@@ -1,0 +1,7 @@
+*.zip
+*.jpg
+*.jpeg
+.DS_Store
+Thumbs.db
+work/
+test-data/

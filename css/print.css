@@ -1,0 +1,4 @@
+/* Stage 2で台帳印刷を実装するための予約ファイルです。 */
+@media print {
+  .app-header, .main-nav { display: none !important; }
+}

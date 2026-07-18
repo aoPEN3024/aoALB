@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#1855a0">
+  <title>aoALB 工事写真台帳</title>
+  <link rel="stylesheet" href="css/app.css">
+  <link rel="stylesheet" href="css/print.css" media="print">
+</head>
+<body>
+  <header class="app-header">
+    <a class="brand" href="#import" aria-label="aoALB ホーム">
+      <span class="brand-mark">ao<span>ALB</span></span>
+      <span class="brand-subtitle">工事写真台帳</span>
+    </a>
+    <nav class="main-nav" aria-label="メインメニュー">
+      <button type="button" data-view="import">ZIPを読み込む</button>
+      <button type="button" data-view="projects">工事一覧</button>
+      <button type="button" data-view="photos">写真一覧</button>
+      <button type="button" data-view="history">取込み履歴</button>
+    </nav>
+  </header>
+
+  <main id="app" tabindex="-1">
+    <section id="view-import" class="view" aria-labelledby="import-title">
+      <div class="page-heading">
+        <p class="eyebrow">aoPIC → aoALB</p>
+        <h1 id="import-title">aoALB用ZIPを読み込む</h1>
+        <p>aoPICから出力したmanifestVersion 1のZIPを、検証後にこの端末へ保存します。</p>
+      </div>
+      <div class="import-layout">
+        <div id="drop-zone" class="drop-zone">
+          <input id="zip-file" type="file" accept=".zip,application/zip" hidden>
+          <div class="drop-icon" aria-hidden="true">ZIP</div>
+          <h2>ZIPファイルを選択</h2>
+          <p>ここへドロップするか、ボタンから選択してください。</p>
+          <button id="choose-zip" type="button" class="primary">ファイルを選ぶ</button>
+          <p class="limit-note">最大250MB・写真1,000枚・JPEG1枚20MB</p>
+        </div>
+        <aside class="security-note">
+          <h2>取込み前に全件検証します</h2>
+          <ol>
+            <li>manifestとJPEGの一対一対応</li>
+            <li>UUID、寸法、容量、SHA-256</li>
+            <li>危険なパスや不要ファイルの不在</li>
+          </ol>
+          <p>1件でも異常があれば、工事や写真は保存しません。</p>
+        </aside>
+      </div>
+      <section id="import-progress" class="status-panel" hidden aria-live="polite">
+        <div class="status-row"><strong id="progress-title">検証中</strong><span id="progress-count"></span></div>
+        <progress id="progress-bar" max="100" value="0"></progress>
+        <p id="progress-message"></p>
+      </section>
+      <section id="import-result" class="result-panel" hidden aria-live="polite">
+        <h2 id="result-title"></h2>
+        <ul id="result-messages"></ul>
+      </section>
+      <section id="conflict-panel" class="result-panel warning" hidden>
+        <h2>既存写真との情報差分があります</h2>
+        <p>画像は同一です。既存情報を維持するか、aoPICの分類・台帳情報で更新するか選択してください。</p>
+        <ul id="conflict-list"></ul>
+        <div class="actions">
+          <button id="keep-existing" type="button" class="secondary">既存を維持</button>
+          <button id="update-existing" type="button" class="danger-outline">aoPIC情報で更新</button>
+        </div>
+      </section>
+    </section>
+
+    <section id="view-projects" class="view" hidden aria-labelledby="projects-title">
+      <div class="page-heading"><p class="eyebrow">PROJECTS</p><h1 id="projects-title">工事一覧</h1></div>
+      <div id="project-list" class="project-grid"></div>
+      <p id="project-empty" class="empty-state" hidden>取り込まれた工事はありません。</p>
+    </section>
+
+    <section id="view-photos" class="view" hidden aria-labelledby="photos-title">
+      <div class="page-heading compact">
+        <p class="eyebrow">PHOTOS</p><h1 id="photos-title">写真一覧</h1>
+        <p id="selected-project-name">工事を選択してください。</p>
+      </div>
+      <div class="filter-panel" aria-label="写真の絞り込み">
+        <label>工種<select id="filter-koushu"></select></label>
+        <label>種別<select id="filter-shubetsu"></select></label>
+        <label>細別<select id="filter-saibetsu"></select></label>
+        <label>測点<select id="filter-sokuten"></select></label>
+        <label class="check-label"><input id="filter-unclassified" type="checkbox">未分類のみ</label>
+        <label class="search-label">文字検索<input id="filter-search" type="search" placeholder="摘要・台帳タイトルなど"></label>
+        <label>並び替え<select id="photo-sort"><option value="captured-asc">撮影日時 昇順</option><option value="captured-desc">撮影日時 降順</option><option value="koushu">工種順</option></select></label>
+        <button id="clear-filters" type="button" class="secondary">条件をクリア</button>
+      </div>
+      <div class="list-summary"><span id="photo-count">0件</span></div>
+      <div id="photo-list" class="photo-grid"></div>
+      <p id="photo-empty" class="empty-state" hidden>条件に一致する写真はありません。</p>
+    </section>
+
+    <section id="view-history" class="view" hidden aria-labelledby="history-title">
+      <div class="page-heading"><p class="eyebrow">IMPORTS</p><h1 id="history-title">取込み履歴</h1></div>
+      <div class="table-wrap"><table><thead><tr><th>取込日時</th><th>状態</th><th>工事名</th><th>写真件数</th><th>exportId</th><th>警告・エラー</th></tr></thead><tbody id="history-body"></tbody></table></div>
+      <p id="history-empty" class="empty-state" hidden>取込み履歴はありません。</p>
+    </section>
+  </main>
+
+  <dialog id="photo-detail">
+    <div class="dialog-header"><h2>写真詳細</h2><button id="close-detail" type="button" aria-label="閉じる">×</button></div>
+    <div class="detail-layout">
+      <div class="detail-image-wrap"><img id="detail-image" alt="工事写真"></div>
+      <div id="detail-fields" class="detail-fields"></div>
+    </div>
+  </dialog>
+
+  <script src="vendor/jszip.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

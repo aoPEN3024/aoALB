@@ -1,7 +1,7 @@
 import { validateAoalbZip, ImportValidationError } from "./importer.js";
 import {
   openDatabase, getImportByExportId, getProjects, getImports, getPhotosByProjectUid,
-  getPhotoFile, analyzeImportConflicts, saveValidatedImport, recordFailedImport
+  getPhotoFile, analyzeImportConflicts, estimateImportStorage, saveValidatedImport, recordFailedImport
 } from "./storage.js";
 
 const views = ["import", "projects", "photos", "history"];
@@ -14,6 +14,57 @@ let importing = false;
 let detailUrl = null;
 let thumbnailObserver = null;
 const thumbnailUrls = new Set();
+
+class StorageCapacityError extends Error {
+  constructor(requiredBytes, availableBytes) {
+    super("端末またはブラウザの保存容量が不足しています。");
+    this.name = "StorageCapacityError";
+    this.requiredBytes = requiredBytes;
+    this.availableBytes = availableBytes;
+  }
+}
+
+function formatBytes(value) {
+  const bytes = Math.max(0, Number(value) || 0);
+  const units = [[1024 ** 3, "GB"], [1024 ** 2, "MB"], [1024, "KB"]];
+  const [base, unit] = units.find(([size]) => bytes >= size) || [1, "bytes"];
+  const digits = base === 1 ? 0 : bytes / base >= 10 ? 1 : 2;
+  return `${new Intl.NumberFormat("ja-JP", { maximumFractionDigits: digits }).format(bytes / base)} ${unit}`;
+}
+
+function isQuotaError(error) {
+  let current = error;
+  for (let depth = 0; current && depth < 4; depth += 1, current = current.cause) {
+    const name = String(current.name || "");
+    const message = String(current.message || "");
+    if (name === "QuotaExceededError" || /quota|not enough (?:storage|space)|storage (?:is )?full|disk (?:is )?full|容量.*不足|空き容量/i.test(message)) return true;
+  }
+  return false;
+}
+
+function messagesForImportError(error) {
+  if (error instanceof StorageCapacityError) {
+    return [
+      `必要容量の概算: ${formatBytes(error.requiredBytes)}`,
+      `現在利用できる容量の概算: ${formatBytes(error.availableBytes)}`,
+      "写真は1枚も保存されていません。",
+      "より小さいZIPを使用するか、端末の空き容量を確保してから再度お試しください。"
+    ];
+  }
+  if (isQuotaError(error)) {
+    return ["端末またはブラウザの保存容量が不足しているため、写真を取り込めませんでした。今回の写真は保存されていません。"];
+  }
+  return error instanceof ImportValidationError ? error.errors : [error?.message || "取込み処理に失敗しました。"];
+}
+
+function withNoSaveNotice(messages) {
+  return messages.some(message => message.includes("保存されていません")) ? messages : [...messages, "工事と写真は保存されていません。"];
+}
+
+function showPersistFailure(error) {
+  elements["import-progress"].hidden = true;
+  showResult("error", "保存できませんでした", withNoSaveNotice(messagesForImportError(error)));
+}
 
 function textElement(tag, text, className = "") {
   const element = document.createElement(tag);
@@ -66,6 +117,11 @@ function resetImportMessages() {
 }
 
 async function persistValidated(validated, mode) {
+  setProgress({ message: "保存に必要な空き容量を確認しています", percent: 100 });
+  const capacity = await estimateImportStorage(validated);
+  if (capacity.supported && !capacity.sufficient) {
+    throw new StorageCapacityError(capacity.requiredBytes, capacity.availableBytes);
+  }
   setProgress({ message: "この端末へ安全に保存しています", percent: 100 });
   const result = await saveValidatedImport(validated, mode);
   pendingImport = null;
@@ -107,9 +163,9 @@ async function handleZip(file) {
     }
     await persistValidated(validated, "preserve");
   } catch (error) {
-    const messages = error instanceof ImportValidationError ? error.errors : [error?.message || "取込み処理に失敗しました。"];
+    const messages = messagesForImportError(error);
     failureContext = { ...failureContext, ...(error.context || {}) };
-    showResult("error", "ZIPを取り込めませんでした", [...messages, "工事と写真は保存されていません。"]);
+    showResult("error", "ZIPを取り込めませんでした", withNoSaveNotice(messages));
     elements["import-progress"].hidden = true;
     await recordFailedImport({ ...failureContext, errors: messages }).catch(() => {});
     await renderHistory();
@@ -313,8 +369,8 @@ elements["zip-file"].addEventListener("change", event => handleZip(event.target.
 for (const eventName of ["dragenter", "dragover"]) elements["drop-zone"].addEventListener(eventName, event => { event.preventDefault(); elements["drop-zone"].classList.add("dragover"); });
 for (const eventName of ["dragleave", "drop"]) elements["drop-zone"].addEventListener(eventName, event => { event.preventDefault(); elements["drop-zone"].classList.remove("dragover"); });
 elements["drop-zone"].addEventListener("drop", event => handleZip(event.dataTransfer.files[0]));
-elements["keep-existing"].addEventListener("click", () => pendingImport && persistValidated(pendingImport, "preserve").catch(error => showResult("error", "保存できませんでした", [error.message])));
-elements["update-existing"].addEventListener("click", () => pendingImport && persistValidated(pendingImport, "update").catch(error => showResult("error", "保存できませんでした", [error.message])));
+elements["keep-existing"].addEventListener("click", () => pendingImport && persistValidated(pendingImport, "preserve").catch(showPersistFailure));
+elements["update-existing"].addEventListener("click", () => pendingImport && persistValidated(pendingImport, "update").catch(showPersistFailure));
 
 for (const id of ["filter-koushu", "filter-shubetsu", "filter-saibetsu", "filter-sokuten", "filter-unclassified", "photo-sort"]) elements[id].addEventListener("change", renderPhotoCards);
 elements["filter-search"].addEventListener("input", renderPhotoCards);

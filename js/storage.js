@@ -69,6 +69,58 @@ export const getPhotoByUid = photoUid => getByIndex("photos", "photoUid", photoU
 export const getProjects = () => getAll("projects");
 export const getImports = () => getAll("imports");
 
+const STORAGE_BASE_RESERVE = 8 * 1024 * 1024;
+const STORAGE_METADATA_MINIMUM = 512 * 1024;
+
+function serializedByteLength(value) {
+  const text = JSON.stringify(value);
+  if (typeof TextEncoder === "function") return new TextEncoder().encode(text).byteLength;
+  return text.length * 3;
+}
+
+export async function estimateImportStorage(validated, estimateProvider = globalThis.navigator?.storage?.estimate?.bind(globalThis.navigator.storage)) {
+  let newJpegBytes = 0;
+  for (const photo of validated.photos) {
+    if (!await getPhotoByUid(photo.photoUid)) newJpegBytes += photo.bytes;
+  }
+
+  const metadata = {
+    manifestVersion: validated.manifestVersion,
+    exportId: validated.exportId,
+    exportedAt: validated.exportedAt,
+    project: validated.project,
+    photos: validated.photos.map(({ blob: _blob, ...photo }) => photo)
+  };
+  const metadataBytes = serializedByteLength(metadata);
+  const metadataReserve = Math.max(STORAGE_METADATA_MINIMUM, metadataBytes * 3);
+  const transactionReserve = Math.max(STORAGE_BASE_RESERVE, Math.ceil(newJpegBytes * 0.75));
+  const requiredBytes = Math.ceil(newJpegBytes + metadataReserve + transactionReserve);
+
+  if (typeof estimateProvider !== "function") {
+    return { supported: false, requiredBytes, newJpegBytes, metadataBytes };
+  }
+
+  try {
+    const estimate = await estimateProvider();
+    const quota = Number(estimate?.quota);
+    const usage = Number(estimate?.usage || 0);
+    if (!Number.isFinite(quota) || quota <= 0 || !Number.isFinite(usage) || usage < 0) {
+      return { supported: false, requiredBytes, newJpegBytes, metadataBytes };
+    }
+    const availableBytes = Math.max(0, quota - usage);
+    return {
+      supported: true,
+      sufficient: availableBytes >= requiredBytes,
+      requiredBytes,
+      availableBytes,
+      newJpegBytes,
+      metadataBytes
+    };
+  } catch (_) {
+    return { supported: false, requiredBytes, newJpegBytes, metadataBytes };
+  }
+}
+
 export async function getPhotosByProjectUid(projectUid) {
   const db = await openDatabase();
   const tx = db.transaction("photos", "readonly");

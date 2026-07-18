@@ -28,5 +28,6 @@ python -m http.server 8000
 - 対応形式: aoPIC `aoALB-export` / `manifestVersion: 1`
 - 実際のZIPや工事写真はリポジトリへ含めません。
 - ZIP由来のHTML、JavaScript、SVGは実行・表示しません。
+- 現在のバージョンでは、取り込んだ工事・写真をアプリ内から削除できません。削除機能は今後追加予定です。
 
 JSZip 3.10.1を`vendor/jszip.min.js`へ同梱しています（MIT/GPLv3 dual license）。

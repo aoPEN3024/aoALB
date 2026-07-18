@@ -18,6 +18,7 @@
       <button type="button" data-view="import">ZIPを読み込む</button>
       <button type="button" data-view="projects">工事一覧</button>
       <button type="button" data-view="photos">写真一覧</button>
+      <button type="button" data-view="ledgers">台帳編集</button>
       <button type="button" data-view="history">取込み履歴</button>
     </nav>
   </header>
@@ -99,6 +100,51 @@
       <div class="page-heading"><p class="eyebrow">IMPORTS</p><h1 id="history-title">取込み履歴</h1></div>
       <div class="table-wrap"><table><thead><tr><th>取込日時</th><th>状態</th><th>工事名</th><th>写真件数</th><th>exportId</th><th>警告・エラー</th></tr></thead><tbody id="history-body"></tbody></table></div>
       <p id="history-empty" class="empty-state" hidden>取込み履歴はありません。</p>
+    </section>
+
+    <section id="view-ledgers" class="view ledger-view" hidden aria-labelledby="ledgers-title">
+      <div class="page-heading compact ledger-heading">
+        <div><p class="eyebrow">LEDGER</p><h1 id="ledgers-title">施工状況写真台帳</h1></div>
+        <p>写真情報を変更せず、台帳ごとの配置だけを保存します。</p>
+      </div>
+      <div class="ledger-setup" aria-label="台帳設定">
+        <label>工事<select id="ledger-project"></select></label>
+        <label>台帳<select id="ledger-select"></select></label>
+        <button id="ledger-new" type="button" class="secondary">新しい台帳</button>
+        <label class="ledger-title-label">台帳名<input id="ledger-title" type="text" maxlength="120" value="施工状況写真"></label>
+        <label class="check-label ledger-cover-toggle"><input id="ledger-show-cover" type="checkbox" checked>表紙あり</label>
+      </div>
+      <div class="ledger-toolbar">
+        <button id="ledger-auto" type="button" class="secondary">撮影日時順に自動配置</button>
+        <button id="ledger-add-page" type="button" class="secondary">空ページを追加</button>
+        <button id="ledger-print" type="button" class="primary" disabled>印刷／PDF保存</button>
+        <span id="ledger-save-status" class="ledger-save-status" role="status" aria-live="polite"></span>
+      </div>
+      <div class="ledger-mobile-tabs" role="tablist" aria-label="台帳編集表示">
+        <button id="ledger-tab-photos" type="button" role="tab" aria-selected="true">写真</button>
+        <button id="ledger-tab-pages" type="button" role="tab" aria-selected="false">台帳</button>
+      </div>
+      <div id="ledger-workspace" class="ledger-workspace" data-mobile-pane="photos">
+        <aside class="ledger-photo-pane" aria-label="未配置写真">
+          <div class="ledger-pane-heading"><h2>未配置写真</h2><span id="ledger-unplaced-count">0枚</span></div>
+          <div class="ledger-photo-filters">
+            <label>工種<select id="ledger-filter-koushu"></select></label>
+            <label>種別<select id="ledger-filter-shubetsu"></select></label>
+            <label>細別<select id="ledger-filter-saibetsu"></select></label>
+            <label>測点<select id="ledger-filter-sokuten"></select></label>
+            <label class="wide">文字検索<input id="ledger-filter-search" type="search" placeholder="細別・測点・台帳文など"></label>
+            <button id="ledger-clear-filters" type="button" class="secondary wide">絞り込みを解除</button>
+          </div>
+          <p id="ledger-selection-help" class="ledger-help">写真を選び、台帳の空き枠をタップしてください。</p>
+          <div id="ledger-photo-list" class="ledger-library"></div>
+          <p id="ledger-photo-empty" class="empty-state compact" hidden>未配置写真はありません。</p>
+        </aside>
+        <section class="ledger-preview-pane" aria-label="台帳プレビュー">
+          <div id="ledger-warning-panel" class="ledger-warning-panel" hidden aria-live="polite"></div>
+          <p id="ledger-empty-guide" class="empty-state">工事を選択して台帳を作成してください。</p>
+          <div id="ledger-pages" class="ledger-pages"></div>
+        </section>
+      </div>
     </section>
   </main>
 

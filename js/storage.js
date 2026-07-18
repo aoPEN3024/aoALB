@@ -68,6 +68,33 @@ export const getProjectByUid = projectUid => getByIndex("projects", "projectUid"
 export const getPhotoByUid = photoUid => getByIndex("photos", "photoUid", photoUid);
 export const getProjects = () => getAll("projects");
 export const getImports = () => getAll("imports");
+export const getLedgers = () => getAll("ledgers");
+
+export async function getLedger(internalId) {
+  const db = await openDatabase();
+  const tx = db.transaction("ledgers", "readonly");
+  return requestResult(tx.objectStore("ledgers").get(internalId));
+}
+
+export async function getLedgersByProjectId(projectId) {
+  const ledgers = await getAll("ledgers");
+  return ledgers.filter(ledger => ledger.projectId === projectId);
+}
+
+export async function saveLedger(ledger) {
+  const db = await openDatabase();
+  const tx = db.transaction("ledgers", "readwrite");
+  const done = transactionDone(tx);
+  try {
+    tx.objectStore("ledgers").put(structuredClone(ledger));
+    await done;
+    return ledger;
+  } catch (error) {
+    try { tx.abort(); } catch (_) { /* already completed or aborted */ }
+    await done.catch(() => {});
+    throw error;
+  }
+}
 
 const STORAGE_BASE_RESERVE = 8 * 1024 * 1024;
 const STORAGE_METADATA_MINIMUM = 512 * 1024;

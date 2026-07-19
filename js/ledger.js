@@ -232,6 +232,7 @@ export function initLedgerEditor() {
   let captionEditor = null;
   let previewResizeObserver = null;
   let previewScaleFrame = 0;
+  let previewValidationTimer = 0;
   const mobileScroll = { photos: 0, pages: 0 };
   const narrowScreen = window.matchMedia("(max-width: 900px)");
 
@@ -263,6 +264,7 @@ export function initLedgerEditor() {
       control.disabled = control.value === "spread" && narrowScreen.matches;
     }
     schedulePreviewScale();
+    schedulePreviewValidation();
   }
 
   function updatePreviewScale() {
@@ -279,7 +281,10 @@ export function initLedgerEditor() {
     ui.pages.style.setProperty("--ledger-preview-scale", String(scale));
     ui.pages.style.setProperty("--ledger-frame-width", `${baseWidth * scale}px`);
     ui.pages.style.setProperty("--ledger-frame-height", `${baseHeight * scale}px`);
-    ui.pages.dataset.previewScale = scale.toFixed(6);
+    const nextScale = scale.toFixed(6);
+    const changed = ui.pages.dataset.previewScale !== nextScale;
+    ui.pages.dataset.previewScale = nextScale;
+    if (changed) schedulePreviewValidation();
   }
 
   function schedulePreviewScale() {
@@ -291,6 +296,7 @@ export function initLedgerEditor() {
     if (previewResizeObserver || typeof ResizeObserver === "undefined") return;
     previewResizeObserver = new ResizeObserver(schedulePreviewScale);
     previewResizeObserver.observe(ui.preview);
+    document.fonts?.ready?.then(schedulePreviewValidation);
   }
 
   function stopPreviewObserver() {
@@ -298,6 +304,8 @@ export function initLedgerEditor() {
     previewResizeObserver = null;
     if (previewScaleFrame) cancelAnimationFrame(previewScaleFrame);
     previewScaleFrame = 0;
+    if (previewValidationTimer) clearTimeout(previewValidationTimer);
+    previewValidationTimer = 0;
   }
 
   function photoById(photoId) {
@@ -436,16 +444,20 @@ export function initLedgerEditor() {
       ui.print.disabled = false;
       return;
     }
-    ui.warnings.append(element("strong", "", "8ptでも説明欄に収まらない写真があります。分類または台帳文を短くしてください。"));
+    ui.warnings.append(element("strong", "", "最小文字サイズでも枠内に収まらない項目があります。文字を短くしてください。"));
     const list = document.createElement("ul");
     for (const issue of result.issues) {
       const fields = issue.fields.map(field => `${field.label}（${field.count}文字）`).join("、");
       const item = element("li");
-      item.append(document.createTextNode(`写真枠${issue.index + 1}: ${fields} `));
-      const edit = element("button", "ledger-warning-edit", "文言を編集");
-      edit.type = "button";
-      edit.addEventListener("click", () => openCaptionEditor(issue.index));
-      item.append(edit);
+      if (issue.kind === "cover") {
+        item.append(document.createTextNode(`表紙: ${fields}`));
+      } else {
+        item.append(document.createTextNode(`写真枠${issue.index + 1}: ${fields} `));
+        const edit = element("button", "ledger-warning-edit", "文言を編集");
+        edit.type = "button";
+        edit.addEventListener("click", () => openCaptionEditor(issue.index));
+        item.append(edit);
+      }
       list.append(item);
     }
     ui.warnings.append(list);
@@ -508,6 +520,18 @@ export function initLedgerEditor() {
     const images = [...ui.pages.querySelectorAll("img")];
     await Promise.all(images.map(image => image.decode?.().catch(() => {}) || Promise.resolve()));
     return validateLedgerPages(ui.pages, photos, currentLedger);
+  }
+
+  function schedulePreviewValidation() {
+    if (!active || !currentLedger) return;
+    if (previewValidationTimer) clearTimeout(previewValidationTimer);
+    const ledgerId = currentLedger.internalId;
+    previewValidationTimer = setTimeout(async () => {
+      previewValidationTimer = 0;
+      if (!active || currentLedger?.internalId !== ledgerId) return;
+      const result = await validatePreview();
+      if (active && currentLedger?.internalId === ledgerId) renderWarnings(result);
+    }, 80);
   }
 
   async function renderPreview() {

@@ -134,9 +134,19 @@ create temp table security_test_results (
   passed boolean not null,
   detail text not null
 ) on commit drop;
-grant usage on schema pg_temp to authenticated;
-grant select on pg_temp.security_test_context to authenticated;
-grant select, insert on pg_temp.security_test_results to authenticated;
+do $temp_grants$
+declare
+  v_temp_schema text;
+begin
+  select n.nspname into strict v_temp_schema
+  from pg_catalog.pg_namespace n
+  where n.oid = pg_catalog.pg_my_temp_schema();
+
+  execute format('grant usage on schema %I to authenticated', v_temp_schema);
+  execute format('grant select on %I.security_test_context to authenticated', v_temp_schema);
+  execute format('grant select, insert on %I.security_test_results to authenticated', v_temp_schema);
+end
+$temp_grants$;
 
 do $fixtures$
 declare

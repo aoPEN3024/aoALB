@@ -1,4 +1,4 @@
-import { loadCloudConfig, saveCloudConfig } from "./cloud/config.js";
+import { loadCloudConfig, loadLocalCloudConfig, saveCloudConfig } from "./cloud/config.js";
 import { MockSiteProvider } from "./cloud/mock-provider.js";
 import { createSupabaseProvider } from "./cloud/supabase-provider.js";
 import {
@@ -170,6 +170,14 @@ export function initSiteSharing() {
   async function activate() {
     active = true;
     identity = await getCloudIdentity();
+    try {
+      await loadLocalCloudConfig();
+    } catch (error) {
+      localStorage.setItem(MODE_KEY, "local");
+      setMessage(error?.message || "ローカル接続設定を読み込めませんでした。", true);
+      await renderStatus();
+      return;
+    }
     const config = loadCloudConfig();
     ui.projectUrl.value = config?.projectUrl || "";
     ui.publishableKey.value = "";

@@ -45,5 +45,6 @@ python -m http.server 8000
 - 現場共有は初期試作です。Supabase未設定時は外部通信せず、従来のローカル機能だけが動作します。
 - 実写真と台帳のクラウド同期はまだ行いません。現在の同期対象は接続確認用メタデータだけです。
 - service role key、DBパスワード、参加コードをリポジトリへ保存しません。
+- Supabaseのローカル検証手順は[`docs/supabase-setup.md`](docs/supabase-setup.md)を参照してください。接続設定はgit管理外の`config/cloud.local.json`へ保存し、Publishable keyだけを使用します。
 
 JSZip 3.10.1を`vendor/jszip.min.js`へ同梱しています（MIT/GPLv3 dual license）。

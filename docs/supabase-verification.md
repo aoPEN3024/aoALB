@@ -1,34 +1,37 @@
-# Supabase実環境での確認項目
+# Supabase実環境のセキュリティ検証
 
-この文書は外部プロジェクト作成後に行う確認手順である。実写真は使わず、テスト用メタデータだけで検証する。
+`supabase/verification/202607190003_security_verification.sql`は、基盤と初期現場を検査します。テスト用の工事・写真メタデータをトランザクション内だけに作り、最後に`ROLLBACK`します。JPEGはアップロードしません。
 
-## 必須設定
+## SQLで自動確認する内容
 
-1. Anonymous Sign-Insを有効にする。
-2. CAPTCHAまたはTurnstileと匿名認証のレート制限を設定する。
-3. migrationを適用する。
-4. `site-photos`が非公開バケットであることを確認する。
-5. `sync_events`がRealtime publicationへ登録されていることを確認する。
-6. Project URLと公開用publishable keyだけをaoALBへ入力する。
-7. service role key、DBパスワード、JWT secretは入力しない。
+- pgcrypto、全テーブル、RLS、Storage bucket・policy、Realtime登録
+- すべてのSECURITY DEFINER関数の固定`search_path`
+- PUBLIC・anonへ不要な関数実行権限がないこと
+- 永続的なbootstrap関数がないこと
+- admin、viewer、editor、未所属ユーザーのRLS挙動
+- 未所属ユーザーから見える現場が0件であること
+- 現場IDを変えても5回で参加試行がブロックされること
+- siteIdをまたぐ複合外部キー不整合とStorageパス不整合の拒否
 
-## RLS試験
+結果一覧の全行が`passed = true`であることを確認します。エラーまたはfalseが1件でもあれば、実写真の同期、Pages公開、PRのマージを停止します。
 
-- 未認証では全業務表を取得できない
-- 匿名認証済み・未参加端末では全現場を取得できない
-- 現場Aのviewerは現場Aだけ読め、追加・更新・削除できない
-- 現場Aのeditorは現場Aへ追加・更新でき、削除と管理操作はできない
-- 現場Aのadminだけが削除、参加コード変更、端末解除を行える
-- 現場Aの全権限で現場BのUUIDを指定しても取得・更新できない
-- `site_join_codes`のハッシュをクライアントから取得できない
-- Storageの`現場B UUID/...`へ現場A端末が読み書きできない
-- service role keyが配信HTML、JavaScript、Network、localStorageに存在しない
+## Dashboardで追加確認する内容
 
-## 同期試験
+1. **Authentication > Users**: 初期管理者UUIDと匿名ユーザーであること
+2. **Table Editor**: `site_join_codes`に平文参加コードがなく、`grant_role`がeditorまたはviewerであること
+3. **Storage > Buckets > site-photos**: Private、20MB、image/jpegのみ
+4. **Database > Replication**: sync_eventsがRealtime対象であること
+5. **Database > Policies**: 業務テーブルとstorage.objectsのpolicyが有効であること
 
-- 2つの別ブラウザプロファイルで匿名IDが異なる
-- 同じ現場へ参加後、端末1のテストイベントを端末2が受信する
-- 同じeventIdを再送しても1件だけになる
-- オフライン送信はpendingとなり、復帰後にsyncedとなる
-- revision不一致時は更新せず競合になる
-- 実写真と台帳同期はこの試験がすべて通るまで開始しない
+## 2端末相当の手動確認
+
+- 別ブラウザプロファイルで匿名Auth UUIDが異なる
+- 初期管理者と参加端末が同じ現場へ参加できる
+- 無効化した端末が参加コードを再入力しても復帰できない
+- 誤った現場ID・参加コードは同じ一般エラーになり、5回目から15分停止する
+- viewerは読取のみ、editorは追加・更新、adminだけが削除・管理操作を行える
+- 現場Aの端末は現場BのUUIDやStorageパスへアクセスできない
+- テストイベントの再送で同じeventIdが二重登録されない
+- オフライン時はpending、復帰後はsyncedになる
+
+実写真と台帳同期は、このSQL検証と手動確認がすべて通った後の別段階です。

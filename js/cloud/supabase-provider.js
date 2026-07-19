@@ -22,6 +22,7 @@ export async function createSupabaseProvider(config) {
       const row = Array.isArray(data) ? data[0] : data;
       if (!row?.site_id) {
         if (row?.error_code === "temporarily_blocked") throw new Error("参加コードの確認回数が上限に達しました。15分後に再試行してください。");
+        if (row?.error_code === "membership_disabled") throw new Error("この端末の現場参加は管理者により無効化されています。管理者へ確認してください。");
         if (row?.error_code === "auth_required") throw new Error("匿名端末認証を確認できません。");
         throw new Error("現場IDまたは参加コードが正しくありません。");
       }

@@ -3,16 +3,22 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#1855a0">
-  <title>aoALB 工事写真台帳</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231855a0'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-size='34' font-family='Arial' font-weight='700' fill='white'%3EA%3C/text%3E%3C/svg%3E">
+  <meta name="theme-color" content="#0145a0">
+  <meta name="description" content="aoPICで出力したZIPから、工事写真台帳を作成できる静的Webアプリです。">
+  <title>aoALB｜工事写真台帳</title>
+  <link rel="icon" type="image/png" sizes="16x16" href="assets/brand/favicon-16-v1.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/brand/favicon-32-v1.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="assets/brand/apple-touch-icon-v1.png">
   <link rel="stylesheet" href="css/app.css">
   <link rel="stylesheet" href="css/print.css" media="print">
 </head>
 <body>
   <header class="app-header">
     <a class="brand" href="#import" aria-label="aoALB ホーム">
-      <span class="brand-mark">ao<span>ALB</span></span>
+      <span class="brand-logo">
+        <img class="brand-icon" src="assets/brand/aoalb-icon-v1.png" alt="" aria-hidden="true">
+        <img class="brand-wordmark" src="assets/brand/aoalb-wordmark-v1.png" alt="aoALB">
+      </span>
       <span class="brand-subtitle">工事写真台帳</span>
     </a>
     <nav class="main-nav" aria-label="メインメニュー">
@@ -26,6 +32,13 @@
 
   <main id="app" tabindex="-1">
     <section id="view-import" class="view" aria-labelledby="import-title">
+      <div class="import-brand-intro">
+        <img src="assets/brand/aoalb-logo-v1.png" alt="aoALB" width="1028" height="987">
+        <div>
+          <p class="import-tagline">工事写真台帳を、かんたんに。</p>
+          <p>aoPICで出力したZIPから、写真台帳を作成できます。</p>
+        </div>
+      </div>
       <div class="page-heading">
         <p class="eyebrow">aoPIC → aoALB</p>
         <h1 id="import-title">aoALB用ZIPを読み込む</h1>

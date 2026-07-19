@@ -185,6 +185,12 @@ begin
     (pg_catalog.gen_random_uuid(), v_site_id, v_admin_user_id, 'RLS検証', 'verification', v_project_id, 'own-site'),
     (pg_catalog.gen_random_uuid(), v_second_site_id, v_admin_user_id, 'RLS検証', 'verification', v_second_site_id, 'other-site');
 
+  -- Metadata rows only. No JPEG or Storage object body is uploaded.
+  insert into storage.objects(bucket_id, name, owner)
+  values
+    ('site-photos', v_site_id::text || '/rls-own.jpg', v_admin_user_id),
+    ('site-photos', v_second_site_id::text || '/rls-other.jpg', v_admin_user_id);
+
   insert into pg_temp.security_test_context
   values (v_site_id, v_admin_user_id, v_project_id, pg_catalog.gen_random_uuid(), v_second_site_id, v_photo_id, v_ledger_id);
 end
@@ -203,6 +209,9 @@ from public.sites where id = (select second_site_id from pg_temp.security_test_c
 insert into pg_temp.security_test_results
 select 'admin receives own realtime rows only', count(*) = 1, 'visible rows: ' || count(*)
 from public.sync_events;
+insert into pg_temp.security_test_results
+select 'admin sees own Storage path only', count(*) = 1, 'visible rows: ' || count(*)
+from storage.objects where bucket_id = 'site-photos';
 insert into pg_temp.security_test_results
 select 'admin can manage membership', public.set_site_member_active(
   (select site_id from pg_temp.security_test_context),
@@ -245,6 +254,9 @@ from public.ledgers where id = (select ledger_id from pg_temp.security_test_cont
 insert into pg_temp.security_test_results
 select 'viewer receives own realtime rows only', count(*) = 1, 'visible rows: ' || count(*)
 from public.sync_events;
+insert into pg_temp.security_test_results
+select 'viewer sees own Storage path only', count(*) = 1, 'visible rows: ' || count(*)
+from storage.objects where bucket_id = 'site-photos';
 with changed as (
   update public.projects set name = name where id = (select project_id from pg_temp.security_test_context) returning 1
 )
@@ -260,6 +272,14 @@ with changed as (
 )
 insert into pg_temp.security_test_results
 select 'viewer cannot delete ledger', count(*) = 0, 'deleted rows: ' || count(*) from changed;
+with changed as (
+  update storage.objects set metadata = '{}'::jsonb
+  where bucket_id = 'site-photos'
+    and name = (select site_id::text from pg_temp.security_test_context) || '/rls-own.jpg'
+  returning 1
+)
+insert into pg_temp.security_test_results
+select 'viewer cannot update Storage metadata', count(*) = 0, 'updated rows: ' || count(*) from changed;
 do $viewer_admin_rpc$
 begin
   begin
@@ -304,6 +324,25 @@ with created as (
 insert into pg_temp.security_test_results
 select 'editor can insert project metadata', count(*) = 1, 'inserted rows: ' || count(*) from created;
 with changed as (
+  update storage.objects set metadata = jsonb_build_object('verification', true)
+  where bucket_id = 'site-photos'
+    and name = (select site_id::text from pg_temp.security_test_context) || '/rls-own.jpg'
+  returning 1
+)
+insert into pg_temp.security_test_results
+select 'editor can update own Storage metadata', count(*) = 1, 'updated rows: ' || count(*) from changed;
+with created as (
+  insert into storage.objects(bucket_id, name, owner)
+  values (
+    'site-photos',
+    (select site_id::text from pg_temp.security_test_context) || '/rls-editor-insert.jpg',
+    (select admin_user_id from pg_temp.security_test_context)
+  )
+  returning 1
+)
+insert into pg_temp.security_test_results
+select 'editor can insert own Storage metadata', count(*) = 1, 'inserted rows: ' || count(*) from created;
+with changed as (
   delete from public.photos where id = (select photo_id from pg_temp.security_test_context) returning 1
 )
 insert into pg_temp.security_test_results
@@ -338,6 +377,9 @@ insert into pg_temp.security_test_results
 select 'unaffiliated user sees zero ledgers', count(*) = 0, 'visible rows: ' || count(*) from public.ledgers;
 insert into pg_temp.security_test_results
 select 'unaffiliated user receives zero realtime rows', count(*) = 0, 'visible rows: ' || count(*) from public.sync_events;
+insert into pg_temp.security_test_results
+select 'unaffiliated user sees zero Storage paths', count(*) = 0, 'visible rows: ' || count(*)
+from storage.objects where bucket_id = 'site-photos';
 reset role;
 
 -- Five invalid join attempts block the user globally, even with an unknown site code.

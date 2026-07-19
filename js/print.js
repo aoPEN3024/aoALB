@@ -1,5 +1,11 @@
 export const PRINT_TEMPLATE = "construction-3";
 export const LEDGER_FONT_SIZES = Object.freeze([10.5, 10, 9.5, 9, 8.5, 8]);
+export const COVER_FONT_SIZES = Object.freeze({
+  title: [12.8, 12, 11, 10, 9, 8],
+  koushu: [11.9, 11, 10, 9, 8],
+  project: [10.4, 10, 9, 8],
+  contractor: [11.9, 11, 10, 9, 8]
+});
 
 const nextFrame = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
@@ -109,13 +115,24 @@ function createCover(ledger, project) {
   const cover = element("section", "ledger-page ledger-cover");
   cover.dataset.pageType = "cover";
   const firstKoushu = ledger._coverKoushu || "";
-  cover.append(
-    element("div", "ledger-cover-title", ledger.title || "施工状況写真"),
-    element("div", "ledger-cover-koushu", firstKoushu),
-    element("div", "ledger-cover-kouji", project?.name || ""),
-    element("div", "ledger-cover-contractor", project?.contractor || "")
-  );
+  const fields = [
+    ["title", "ledger-cover-title", ledger.title || "施工状況写真"],
+    ["koushu", "ledger-cover-koushu", firstKoushu],
+    ["project", "ledger-cover-kouji", project?.name || ""],
+    ["contractor", "ledger-cover-contractor", project?.contractor || ""]
+  ].map(([name, className, text]) => {
+    const field = element("div", className, text);
+    field.dataset.ledgerCoverField = name;
+    return field;
+  });
+  cover.append(...fields);
   return cover;
+}
+
+function createPageFrame(page) {
+  const frame = element("div", `ledger-page-frame${page.classList.contains("ledger-cover") ? " ledger-cover-frame" : ""}`);
+  frame.append(page);
+  return frame;
 }
 
 export async function renderLedgerPages(container, {
@@ -127,7 +144,7 @@ export async function renderLedgerPages(container, {
   const firstPhoto = firstPhotoSlot ? photosById.get(firstPhotoSlot.photoId) : null;
   const renderLedger = { ...ledger, _coverKoushu: firstPhoto?.classification?.koushu || "" };
   const nodes = [];
-  if (ledger.showCover) nodes.push(createCover(renderLedger, project));
+  if (ledger.showCover) nodes.push(createPageFrame(createCover(renderLedger, project)));
   let flatIndex = 0;
   for (let pageIndex = 0; pageIndex < ledger.pages.length; pageIndex += 1) {
     const pageData = ledger.pages[pageIndex];
@@ -143,7 +160,7 @@ export async function renderLedgerPages(container, {
       page.append(await createSlot(slot, flatIndex, photosById, loadPhotoFile, objectUrls, interactive, selectedSlotIndex, ledger.captionOverrides));
       flatIndex += 1;
     }
-    nodes.push(page);
+    nodes.push(createPageFrame(page));
   }
   container.replaceChildren(...nodes);
   return { objectUrls, photosById };
@@ -154,11 +171,34 @@ function fieldFits(field) {
   if (!content) return true;
   const fieldRect = field.getBoundingClientRect();
   const contentRect = content.getBoundingClientRect();
-  const safety = 2;
+  const scaleX = field.offsetWidth ? fieldRect.width / field.offsetWidth : 1;
+  const scaleY = field.offsetHeight ? fieldRect.height / field.offsetHeight : 1;
   return field.scrollHeight <= field.clientHeight
     && field.scrollWidth <= field.clientWidth
-    && contentRect.bottom <= fieldRect.bottom - safety
-    && contentRect.right <= fieldRect.right - safety;
+    && contentRect.bottom <= fieldRect.bottom - (2 * scaleY)
+    && contentRect.right <= fieldRect.right - (2 * scaleX);
+}
+
+function coverIssues(container) {
+  const labels = { title: "表紙タイトル", koushu: "工種", project: "工事名", contractor: "施工者名" };
+  const issues = [];
+  for (const field of container.querySelectorAll("[data-ledger-cover-field]")) {
+    const name = field.dataset.ledgerCoverField;
+    field.classList.remove("ledger-unfit");
+    let fits = false;
+    for (const size of COVER_FONT_SIZES[name] || [8]) {
+      field.style.fontSize = `${size}pt`;
+      if (field.scrollWidth <= field.clientWidth && field.scrollHeight <= field.clientHeight) {
+        fits = true;
+        break;
+      }
+    }
+    if (!fits) {
+      field.classList.add("ledger-unfit");
+      issues.push({ kind: "cover", fields: [{ label: labels[name] || name, count: [...field.textContent].length }] });
+    }
+  }
+  return issues;
 }
 
 function issueFields(slot, photo, override) {
@@ -179,7 +219,7 @@ export async function validateLedgerPages(container, photos, ledger = null) {
   const photosById = new Map(photos.map(photo => [photo.internalId, photo]));
   if (document.fonts?.ready) await document.fonts.ready;
   await nextFrame();
-  const issues = [];
+  const issues = coverIssues(container);
   let photoCount = 0;
   for (const slot of container.querySelectorAll(".ledger-slot[data-slot-index]")) {
     const index = Number(slot.dataset.slotIndex);
@@ -200,7 +240,7 @@ export async function validateLedgerPages(container, photos, ledger = null) {
     if (!fits) {
       slot.classList.add("ledger-unfit");
       const photo = photosById.get(slot.dataset.photoId) || {};
-      issues.push({ index, photo, fields: issueFields(slot, photo, ledger?.captionOverrides?.[photo.internalId]) });
+      issues.push({ kind: "photo", index, photo, fields: issueFields(slot, photo, ledger?.captionOverrides?.[photo.internalId]) });
     }
   }
   return { valid: photoCount > 0 && issues.length === 0, empty: photoCount === 0, photoCount, issues };

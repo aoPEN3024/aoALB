@@ -4,8 +4,9 @@ import {
   getPhotoFile, analyzeImportConflicts, estimateImportStorage, saveValidatedImport, recordFailedImport
 } from "./storage.js";
 import { initLedgerEditor } from "./ledger.js";
+import { initSiteSharing } from "./sharing.js";
 
-const views = ["import", "projects", "photos", "ledgers", "history"];
+const views = ["import", "projects", "photos", "ledgers", "history", "sharing"];
 const elements = Object.fromEntries(Array.from(document.querySelectorAll("[id]"), element => [element.id, element]));
 let selectedProjectUid = localStorage.getItem("aoALB:selectedProjectUid") || "";
 let currentProject = null;
@@ -16,6 +17,7 @@ let detailUrl = null;
 let thumbnailObserver = null;
 const thumbnailUrls = new Set();
 let ledgerEditor = null;
+let sharingController = null;
 
 class StorageCapacityError extends Error {
   constructor(requiredBytes, availableBytes) {
@@ -92,10 +94,12 @@ function showView(name) {
   document.querySelectorAll("[data-view]").forEach(button => button.classList.toggle("active", button.dataset.view === target));
   if (target !== "photos") revokeThumbnailUrls();
   if (target !== "ledgers") ledgerEditor?.deactivate();
+  if (target !== "sharing") sharingController?.deactivate();
   if (target === "projects") renderProjects();
   if (target === "photos") renderPhotoView();
   if (target === "ledgers") ledgerEditor?.activate(selectedProjectUid);
   if (target === "history") renderHistory();
+  if (target === "sharing") sharingController?.activate();
   if (location.hash !== `#${target}`) history.replaceState(null, "", `#${target}`);
   elements.app.focus({ preventScroll: true });
 }
@@ -394,6 +398,7 @@ window.addEventListener("beforeunload", () => { revokeThumbnailUrls(); if (detai
 try {
   await openDatabase();
   ledgerEditor = initLedgerEditor();
+  sharingController = initSiteSharing();
   await Promise.all([renderProjects(), renderHistory()]);
   showView(location.hash.slice(1) || "import");
 } catch (error) {

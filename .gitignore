@@ -5,3 +5,5 @@
 Thumbs.db
 work/
 test-data/
+.env
+.env.*

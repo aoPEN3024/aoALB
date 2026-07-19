@@ -21,6 +21,7 @@
       <button type="button" data-view="photos">写真一覧</button>
       <button type="button" data-view="ledgers">台帳編集</button>
       <button type="button" data-view="history">取込み履歴</button>
+      <button type="button" data-view="sharing">現場共有</button>
     </nav>
   </header>
 
@@ -101,6 +102,58 @@
       <div class="page-heading"><p class="eyebrow">IMPORTS</p><h1 id="history-title">取込み履歴</h1></div>
       <div class="table-wrap"><table><thead><tr><th>取込日時</th><th>状態</th><th>工事名</th><th>写真件数</th><th>exportId</th><th>警告・エラー</th></tr></thead><tbody id="history-body"></tbody></table></div>
       <p id="history-empty" class="empty-state" hidden>取込み履歴はありません。</p>
+    </section>
+
+    <section id="view-sharing" class="view" hidden aria-labelledby="sharing-title">
+      <div class="page-heading">
+        <p class="eyebrow">SITE SHARING PROTOTYPE</p>
+        <h1 id="sharing-title">現場IDで共有</h1>
+        <p>現場単位の共有を安全に検証する試作画面です。未設定時は従来どおり端末内だけで動作します。</p>
+      </div>
+      <div class="sharing-grid">
+        <section class="sharing-card">
+          <h2>動作モード</h2>
+          <p id="sharing-mode-status" class="sharing-status">ローカルのみ</p>
+          <div class="sharing-actions">
+            <button id="sharing-local-mode" type="button" class="secondary">ローカルのみ</button>
+            <button id="sharing-mock-mode" type="button" class="secondary">端末内試作を開始</button>
+          </div>
+          <p class="limit-note">端末内試作は認証・RLSの代替ではありません。通信せず、別タブ相当の通知動作だけを確認します。</p>
+        </section>
+        <section class="sharing-card">
+          <h2>Supabase接続設定</h2>
+          <form id="sharing-config-form" class="sharing-form">
+            <label>Project URL<input id="sharing-project-url" type="url" autocomplete="off" placeholder="https://example.supabase.co"></label>
+            <label>公開用publishable key<input id="sharing-publishable-key" type="password" autocomplete="off" placeholder="sb_publishable_..."></label>
+            <button type="submit" class="secondary">この端末へ保存</button>
+          </form>
+          <p class="limit-note">service role key、秘密鍵、DBパスワードは絶対に入力しないでください。設定値はGitHubへ送らず、このブラウザだけに保存します。</p>
+        </section>
+        <section class="sharing-card sharing-wide">
+          <h2>現場へ参加</h2>
+          <form id="sharing-join-form" class="sharing-form sharing-join-form">
+            <label>現場ID<input id="sharing-site-code" type="text" maxlength="40" autocomplete="off" placeholder="KUKI-A-2026"></label>
+            <label>参加コード<input id="sharing-join-code" type="password" maxlength="72" autocomplete="one-time-code"></label>
+            <label>端末表示名<input id="sharing-device-name" type="text" maxlength="80" placeholder="事務所PC"></label>
+            <button id="sharing-join" type="submit" class="primary">端末を登録</button>
+          </form>
+          <dl class="sharing-details">
+            <div><dt>端末ID</dt><dd id="sharing-device-id">未登録</dd></div>
+            <div><dt>参加現場</dt><dd id="sharing-current-site">未参加</dd></div>
+            <div><dt>権限</dt><dd id="sharing-current-role">―</dd></div>
+            <div><dt>未送信</dt><dd id="sharing-pending-count">0件</dd></div>
+          </dl>
+        </section>
+        <section class="sharing-card sharing-wide">
+          <h2>同期接続試験</h2>
+          <div class="sharing-actions">
+            <button id="sharing-send-test" type="button" class="primary" disabled>テスト用メタデータを送信</button>
+            <button id="sharing-retry" type="button" class="secondary" disabled>未送信を再送</button>
+          </div>
+          <p id="sharing-message" class="sharing-message" role="status" aria-live="polite"></p>
+          <ul id="sharing-events" class="sharing-events"></ul>
+        </section>
+      </div>
     </section>
 
     <section id="view-ledgers" class="view ledger-view" hidden aria-labelledby="ledgers-title">

@@ -15,13 +15,25 @@ function captionText(photo) {
   return title || String(photo?.ledger?.description || "").trim();
 }
 
-function captionFields(photo) {
+export function automaticCaptionFields(photo) {
   const classification = photo?.classification || {};
   return {
     koushu: String(classification.koushu || ""),
     sokuten: String(classification.sokuten || ""),
-    caption: captionText(photo),
+    text: captionText(photo),
     captionLabel: String(photo?.ledger?.title || "").trim() ? "台帳タイトル" : "台帳説明文"
+  };
+}
+
+export function resolvedCaptionFields(photo, override = null) {
+  const automatic = automaticCaptionFields(photo);
+  const value = override && typeof override === "object" ? override : {};
+  const resolve = key => value[key] === null || value[key] === undefined ? automatic[key] : String(value[key]);
+  return {
+    koushu: resolve("koushu"),
+    sokuten: resolve("sokuten"),
+    text: resolve("text"),
+    captionLabel: value.text === null || value.text === undefined ? automatic.captionLabel : "台帳文"
   };
 }
 
@@ -29,8 +41,8 @@ function addGuides(body) {
   for (const name of ["g1", "g2", "g3"]) body.append(element("span", `ledger-caption-guide ${name}`));
 }
 
-function createCaption(photo) {
-  const values = captionFields(photo);
+function createCaption(photo, override) {
+  const values = resolvedCaptionFields(photo, override);
   const caption = element("div", "ledger-caption");
   const koushu = element("div", "ledger-caption-field");
   koushu.dataset.ledgerField = "koushu";
@@ -40,7 +52,7 @@ function createCaption(photo) {
   sokuten.append(element("span", "ledger-caption-field-content", `測点：${values.sokuten}`));
   const body = element("div", "ledger-caption-body");
   body.dataset.ledgerField = "caption";
-  body.append(element("span", "ledger-caption-body-text", values.caption));
+  body.append(element("span", "ledger-caption-body-text", values.text));
   addGuides(body);
   caption.append(koushu, sokuten, body);
   return caption;
@@ -51,9 +63,12 @@ function createSlotActions(slotIndex, slot) {
   const specs = [
     ["move-prev", "前へ"], ["move-next", "後へ"],
     ["blank-before", "前に空白"], ["blank-after", "後に空白"],
+    slot.type === "photo" ? ["edit-caption", "文言編集"] : null,
     slot.type === "photo" ? ["unplace", "未配置へ"] : ["remove-blank", "空白削除"]
   ];
-  for (const [action, label] of specs) {
+  for (const spec of specs) {
+    if (!spec) continue;
+    const [action, label] = spec;
     const button = element("button", "ledger-mini-button", label);
     button.type = "button";
     button.dataset.ledgerAction = action;
@@ -63,7 +78,7 @@ function createSlotActions(slotIndex, slot) {
   return actions;
 }
 
-async function createSlot(slot, slotIndex, photosById, loadPhotoFile, objectUrls, interactive, selectedSlotIndex) {
+async function createSlot(slot, slotIndex, photosById, loadPhotoFile, objectUrls, interactive, selectedSlotIndex, captionOverrides) {
   const photo = slot.type === "photo" ? photosById.get(slot.photoId) : null;
   const wrapper = element("div", `ledger-slot${photo ? "" : " empty"}${selectedSlotIndex === slotIndex ? " selected" : ""}`);
   wrapper.dataset.slotIndex = String(slotIndex);
@@ -84,7 +99,8 @@ async function createSlot(slot, slotIndex, photosById, loadPhotoFile, objectUrls
   } else {
     imageCell.textContent = "余 白";
   }
-  wrapper.append(warning, imageCell, createCaption(photo));
+  const override = photo ? captionOverrides?.[photo.internalId] : null;
+  wrapper.append(warning, imageCell, createCaption(photo, override));
   if (interactive) wrapper.append(createSlotActions(slotIndex, slot));
   return wrapper;
 }
@@ -124,7 +140,7 @@ export async function renderLedgerPages(container, {
       page.append(remove);
     }
     for (const slot of pageData.slots) {
-      page.append(await createSlot(slot, flatIndex, photosById, loadPhotoFile, objectUrls, interactive, selectedSlotIndex));
+      page.append(await createSlot(slot, flatIndex, photosById, loadPhotoFile, objectUrls, interactive, selectedSlotIndex, ledger.captionOverrides));
       flatIndex += 1;
     }
     nodes.push(page);
@@ -145,8 +161,8 @@ function fieldFits(field) {
     && contentRect.right <= fieldRect.right - safety;
 }
 
-function issueFields(slot, photo) {
-  const values = captionFields(photo);
+function issueFields(slot, photo, override) {
+  const values = resolvedCaptionFields(photo, override);
   const items = [];
   const add = (label, value) => items.push({ label, count: [...String(value)].length });
   const koushu = slot.querySelector('[data-ledger-field="koushu"]');
@@ -154,12 +170,12 @@ function issueFields(slot, photo) {
   const caption = slot.querySelector('[data-ledger-field="caption"]');
   if (koushu && !fieldFits(koushu)) add("工種", values.koushu);
   if (sokuten && !fieldFits(sokuten)) add("測点", values.sokuten);
-  if (caption && !fieldFits(caption)) add(values.captionLabel, values.caption);
-  if (!items.length) add(values.captionLabel, values.caption);
+  if (caption && !fieldFits(caption)) add(values.captionLabel, values.text);
+  if (!items.length) add(values.captionLabel, values.text);
   return items;
 }
 
-export async function validateLedgerPages(container, photos) {
+export async function validateLedgerPages(container, photos, ledger = null) {
   const photosById = new Map(photos.map(photo => [photo.internalId, photo]));
   if (document.fonts?.ready) await document.fonts.ready;
   await nextFrame();
@@ -184,14 +200,14 @@ export async function validateLedgerPages(container, photos) {
     if (!fits) {
       slot.classList.add("ledger-unfit");
       const photo = photosById.get(slot.dataset.photoId) || {};
-      issues.push({ index, photo, fields: issueFields(slot, photo) });
+      issues.push({ index, photo, fields: issueFields(slot, photo, ledger?.captionOverrides?.[photo.internalId]) });
     }
   }
   return { valid: photoCount > 0 && issues.length === 0, empty: photoCount === 0, photoCount, issues };
 }
 
-export async function printLedger(container, photos) {
-  const validation = await validateLedgerPages(container, photos);
+export async function printLedger(container, photos, ledger = null, validationResult = null) {
+  const validation = validationResult || await validateLedgerPages(container, photos, ledger);
   if (!validation.valid) return validation;
   const images = [...container.querySelectorAll("img")];
   await Promise.all(images.map(image => image.decode?.().catch(() => {}) || Promise.resolve()));

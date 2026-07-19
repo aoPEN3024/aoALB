@@ -63,6 +63,22 @@ async function getAll(storeName) {
   return requestResult(tx.objectStore(storeName).getAll());
 }
 
+export async function getSetting(key) {
+  const db = await openDatabase();
+  const tx = db.transaction("settings", "readonly");
+  const record = await requestResult(tx.objectStore("settings").get(key));
+  return record?.value;
+}
+
+export async function setSetting(key, value) {
+  const db = await openDatabase();
+  const tx = db.transaction("settings", "readwrite");
+  const done = transactionDone(tx);
+  tx.objectStore("settings").put({ key, value: structuredClone(value), updatedAt: new Date().toISOString() });
+  await done;
+  return value;
+}
+
 export const getImportByExportId = exportId => getByIndex("imports", "exportId", exportId);
 export const getProjectByUid = projectUid => getByIndex("projects", "projectUid", projectUid);
 export const getPhotoByUid = photoUid => getByIndex("photos", "photoUid", photoUid);

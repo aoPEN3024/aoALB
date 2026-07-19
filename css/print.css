@@ -7,8 +7,9 @@ body.ledger-printing #view-ledgers { display: block !important; }
 body.ledger-printing #view-ledgers > * { display: none !important; }
 body.ledger-printing .ledger-photo-pane { display: none !important; }
 body.ledger-printing #view-ledgers > .ledger-workspace, body.ledger-printing .ledger-preview-pane, body.ledger-printing .ledger-pages { display: block !important; width: 210mm !important; margin: 0 !important; padding: 0 !important; background: #fff !important; }
-body.ledger-printing .ledger-page { width: 210mm !important; height: 297mm !important; aspect-ratio: auto !important; margin: 0 !important; box-shadow: none !important; break-after: page; page-break-after: always; }
-body.ledger-printing .ledger-page:last-child { break-after: auto; page-break-after: auto; }
+body.ledger-printing .ledger-page-frame { display: block !important; width: 210mm !important; height: 297mm !important; margin: 0 !important; break-after: page; page-break-after: always; }
+body.ledger-printing .ledger-page-frame:last-child { break-after: auto; page-break-after: auto; }
+body.ledger-printing .ledger-page { width: 210mm !important; height: 297mm !important; margin: 0 !important; transform: none !important; box-shadow: none !important; break-after: auto; page-break-after: auto; }
 body.ledger-printing .ledger-photo-page { padding: 20mm 14mm 11mm 24mm !important; gap: 2mm !important; }
 body.ledger-printing .ledger-slot { flex: 0 0 87.4mm !important; height: 87.4mm !important; grid-template-columns: 68.3% 31.7% !important; border: .45mm solid #111 !important; box-shadow: none !important; }
 body.ledger-printing .ledger-caption { border-left: .45mm solid #111 !important; font-size: var(--ledger-font-size,10.5pt) !important; }

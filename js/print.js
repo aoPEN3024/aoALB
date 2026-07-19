@@ -118,6 +118,12 @@ function createCover(ledger, project) {
   return cover;
 }
 
+function createPageFrame(page) {
+  const frame = element("div", `ledger-page-frame${page.classList.contains("ledger-cover") ? " ledger-cover-frame" : ""}`);
+  frame.append(page);
+  return frame;
+}
+
 export async function renderLedgerPages(container, {
   ledger, project, photos, loadPhotoFile, interactive = true, selectedSlotIndex = -1
 }) {
@@ -127,7 +133,7 @@ export async function renderLedgerPages(container, {
   const firstPhoto = firstPhotoSlot ? photosById.get(firstPhotoSlot.photoId) : null;
   const renderLedger = { ...ledger, _coverKoushu: firstPhoto?.classification?.koushu || "" };
   const nodes = [];
-  if (ledger.showCover) nodes.push(createCover(renderLedger, project));
+  if (ledger.showCover) nodes.push(createPageFrame(createCover(renderLedger, project)));
   let flatIndex = 0;
   for (let pageIndex = 0; pageIndex < ledger.pages.length; pageIndex += 1) {
     const pageData = ledger.pages[pageIndex];
@@ -143,7 +149,7 @@ export async function renderLedgerPages(container, {
       page.append(await createSlot(slot, flatIndex, photosById, loadPhotoFile, objectUrls, interactive, selectedSlotIndex, ledger.captionOverrides));
       flatIndex += 1;
     }
-    nodes.push(page);
+    nodes.push(createPageFrame(page));
   }
   container.replaceChildren(...nodes);
   return { objectUrls, photosById };
@@ -154,11 +160,12 @@ function fieldFits(field) {
   if (!content) return true;
   const fieldRect = field.getBoundingClientRect();
   const contentRect = content.getBoundingClientRect();
-  const safety = 2;
+  const scaleX = field.offsetWidth ? fieldRect.width / field.offsetWidth : 1;
+  const scaleY = field.offsetHeight ? fieldRect.height / field.offsetHeight : 1;
   return field.scrollHeight <= field.clientHeight
     && field.scrollWidth <= field.clientWidth
-    && contentRect.bottom <= fieldRect.bottom - safety
-    && contentRect.right <= fieldRect.right - safety;
+    && contentRect.bottom <= fieldRect.bottom - (2 * scaleY)
+    && contentRect.right <= fieldRect.right - (2 * scaleX);
 }
 
 function issueFields(slot, photo, override) {

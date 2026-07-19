@@ -6,6 +6,13 @@ export async function hashBlob(blob) {
   return hex(await crypto.subtle.digest("SHA-256", await blob.arrayBuffer()));
 }
 
+async function assertJpegMagic(blob) {
+  const header = new Uint8Array(await blob.slice(0, 3).arrayBuffer());
+  if (header.length !== 3 || header[0] !== 0xff || header[1] !== 0xd8 || header[2] !== 0xff) {
+    throw new Error("JPEGのマジックバイトが一致しません。");
+  }
+}
+
 async function imageBitmapThumbnail(blob, maxDimension, quality) {
   const source = typeof createImageBitmap === "function" ? await createImageBitmap(blob) : await new Promise((resolve, reject) => {
     const url = URL.createObjectURL(blob);
@@ -25,7 +32,7 @@ async function imageBitmapThumbnail(blob, maxDimension, quality) {
     canvas.height = height;
     canvas.getContext("2d", { alpha: false }).drawImage(source, 0, 0, width, height);
     const thumbnail = await new Promise((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error("サムネイルを生成できませんでした。")), "image/jpeg", quality));
-    return { blob: thumbnail, width, height };
+    return { blob: thumbnail, width, height, sourceWidth, sourceHeight };
   } finally {
     source.close?.();
   }
@@ -33,10 +40,14 @@ async function imageBitmapThumbnail(blob, maxDimension, quality) {
 
 export async function createPhotoPackage({ photo, project, file, siteId, eventId, deviceName }) {
   if (!file?.blob || file.blob.type !== "image/jpeg") throw new Error("JPEGデータを読み込めません。");
+  await assertJpegMagic(file.blob);
   if (file.blob.size !== Number(photo.bytes)) throw new Error("JPEGのファイル容量が写真情報と一致しません。");
   const actualSha256 = await hashBlob(file.blob);
   if (actualSha256 !== photo.sha256) throw new Error("JPEGのSHA-256が写真情報と一致しません。");
   const thumbnail = await imageBitmapThumbnail(file.blob, 480, 0.76);
+  if (thumbnail.sourceWidth !== Number(photo.width) || thumbnail.sourceHeight !== Number(photo.height)) {
+    throw new Error("JPEGの画像寸法が写真情報と一致しません。");
+  }
   const thumbnailSha256 = await hashBlob(thumbnail.blob);
   return {
     eventId, siteId, deviceName, project: {

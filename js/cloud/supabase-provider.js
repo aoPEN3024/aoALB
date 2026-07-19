@@ -38,6 +38,15 @@ export async function createSupabaseProvider(config) {
     },
     async uploadPhotoPackage(photoPackage) {
       const { siteId, project, photo, originalBlob, thumbnail, eventId, deviceName } = photoPackage;
+      async function recordSyncEvent(photoRow, completedAt) {
+        const { error } = await client.from("sync_events").insert({
+          event_id: eventId, site_id: siteId, entity_type: "photo", entity_id: photoRow.id,
+          event_type: "photo_synced", device_name: deviceName, payload: { photoUid: photo.photoUid, sha256: photo.sha256 },
+          created_at: completedAt
+        });
+        if (error && error.code !== "23505") throw error;
+      }
+
       let { data: projectRow, error: projectReadError } = await client.from("projects")
         .select("id,project_uid").eq("site_id", siteId).eq("project_uid", project.projectUid).maybeSingle();
       if (projectReadError) throw projectReadError;
@@ -64,6 +73,10 @@ export async function createSupabaseProvider(config) {
         throw new Error("クラウド上の同じphotoUidが異なるJPEGを参照しています。");
       }
       if (!photoRow) {
+        const sameHash = await client.from("photos")
+          .select("id,photo_uid").eq("site_id", siteId).eq("sha256", photo.sha256).maybeSingle();
+        if (sameHash.error) throw sameHash.error;
+        if (sameHash.data) throw new Error("同じSHA-256のJPEGが別のphotoUidで登録されています。");
         const { data, error } = await client.from("photos").insert({
           site_id: siteId, project_id: projectRow.id, photo_uid: photo.photoUid, captured_at: photo.capturedAt,
           sha256: photo.sha256, mime_type: photo.mimeType, width: photo.width, height: photo.height,
@@ -71,9 +84,16 @@ export async function createSupabaseProvider(config) {
         }).select("id,project_id,photo_uid,sha256,bytes,width,height").single();
         if (error?.code === "23505") {
           const retry = await client.from("photos").select("id,project_id,photo_uid,sha256,bytes,width,height")
-            .eq("site_id", siteId).eq("photo_uid", photo.photoUid).single();
+            .eq("site_id", siteId).eq("photo_uid", photo.photoUid).maybeSingle();
           if (retry.error) throw retry.error;
           photoRow = retry.data;
+          if (!photoRow) {
+            const sameHashAfterConflict = await client.from("photos")
+              .select("id,photo_uid").eq("site_id", siteId).eq("sha256", photo.sha256).maybeSingle();
+            if (sameHashAfterConflict.error) throw sameHashAfterConflict.error;
+            if (sameHashAfterConflict.data) throw new Error("同じSHA-256のJPEGが別のphotoUidで登録されています。");
+            throw error;
+          }
           if (photoRow.project_id !== projectRow.id || photoRow.sha256 !== photo.sha256 || Number(photoRow.bytes) !== Number(photo.bytes)) {
             throw new Error("クラウド上の同じphotoUidが異なるJPEGを参照しています。");
           }
@@ -85,6 +105,20 @@ export async function createSupabaseProvider(config) {
 
       const originalPath = `${siteId}/photos/${photo.photoUid}.jpg`;
       const thumbnailPath = `${siteId}/thumbnails/${photo.photoUid}.jpg`;
+      const { data: existingObject, error: existingObjectError } = await client.from("photo_objects")
+        .select("status,object_path,sha256,bytes,upload_completed_at,thumbnail_object_path,thumbnail_sha256,thumbnail_bytes")
+        .eq("photo_id", photoRow.id).maybeSingle();
+      if (existingObjectError) throw existingObjectError;
+      if (existingObject?.status === "complete") {
+        const matches = existingObject.object_path === originalPath && existingObject.sha256 === photo.sha256
+          && Number(existingObject.bytes) === Number(photo.bytes) && existingObject.thumbnail_object_path === thumbnailPath
+          && existingObject.thumbnail_sha256 === thumbnail.sha256 && Number(existingObject.thumbnail_bytes) === Number(thumbnail.bytes)
+          && Boolean(existingObject.upload_completed_at);
+        if (!matches) throw new Error("クラウド上の完成済み写真が端末内の写真情報と一致しません。");
+        await recordSyncEvent(photoRow, existingObject.upload_completed_at);
+        return { photoUid: photo.photoUid, storedAt: existingObject.upload_completed_at, duplicate: true };
+      }
+
       const bucket = client.storage.from("site-photos");
       const { error: originalError } = await bucket.upload(originalPath, originalBlob, { contentType: "image/jpeg", upsert: true, cacheControl: "31536000" });
       if (originalError) throw originalError;
@@ -94,28 +128,23 @@ export async function createSupabaseProvider(config) {
       const completedAt = new Date().toISOString();
       const { error: objectError } = await client.from("photo_objects").upsert({
         photo_id: photoRow.id, site_id: siteId, bucket_id: "site-photos", object_path: originalPath,
-        sha256: photo.sha256, bytes: photo.bytes, upload_completed_at: completedAt,
+        sha256: photo.sha256, bytes: photo.bytes, status: "complete", upload_completed_at: completedAt,
         thumbnail_object_path: thumbnailPath, thumbnail_sha256: thumbnail.sha256,
         thumbnail_bytes: thumbnail.bytes, thumbnail_width: thumbnail.width, thumbnail_height: thumbnail.height
       }, { onConflict: "photo_id" });
       if (objectError) throw objectError;
 
       const { data: stored, error: verifyError } = await client.from("photo_objects")
-        .select("object_path,sha256,bytes,upload_completed_at,thumbnail_object_path,thumbnail_sha256,thumbnail_bytes")
+        .select("status,object_path,sha256,bytes,upload_completed_at,thumbnail_object_path,thumbnail_sha256,thumbnail_bytes")
         .eq("photo_id", photoRow.id).single();
       if (verifyError) throw verifyError;
-      if (stored.object_path !== originalPath || stored.sha256 !== photo.sha256 || Number(stored.bytes) !== Number(photo.bytes)
+      if (stored.status !== "complete" || stored.object_path !== originalPath || stored.sha256 !== photo.sha256 || Number(stored.bytes) !== Number(photo.bytes)
         || stored.thumbnail_object_path !== thumbnailPath || stored.thumbnail_sha256 !== thumbnail.sha256
         || Number(stored.thumbnail_bytes) !== Number(thumbnail.bytes) || !stored.upload_completed_at) {
         throw new Error("Supabase側の写真保存確認に失敗しました。");
       }
 
-      const { error: eventError } = await client.from("sync_events").insert({
-        event_id: eventId, site_id: siteId, entity_type: "photo", entity_id: photoRow.id,
-        event_type: "photo_synced", device_name: deviceName, payload: { photoUid: photo.photoUid, sha256: photo.sha256 },
-        created_at: completedAt
-      });
-      if (eventError && eventError.code !== "23505") throw eventError;
+      await recordSyncEvent(photoRow, completedAt);
       return { photoUid: photo.photoUid, storedAt: completedAt };
     },
     subscribe(siteId, callback) {

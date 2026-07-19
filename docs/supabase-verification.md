@@ -8,8 +8,10 @@
 - すべてのSECURITY DEFINER関数の固定`search_path`
 - PUBLIC・anonへ不要な関数実行権限がないこと
 - 永続的なbootstrap関数がないこと
-- admin、viewer、editor、未所属ユーザーのRLS挙動
-- 未所属ユーザーから見える現場が0件であること
+- admin、viewer、editor、未所属ユーザーの現場・工事・写真・台帳・同期イベントに対するRLS挙動
+- viewerの更新・削除・管理RPC拒否と、editorの追加・更新・削除・管理RPCの権限分離
+- adminが別現場を参照できず、参加コードからadmin権限を付与できないこと
+- 未所属ユーザーから見える現場・工事・写真・台帳・同期イベントが0件であること
 - 現場IDを変えても5回で参加試行がブロックされること
 - siteIdをまたぐ複合外部キー不整合とStorageパス不整合の拒否
 

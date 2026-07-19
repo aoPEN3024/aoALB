@@ -5,11 +5,12 @@
 ## 使用するファイルと順番
 
 1. 基盤: `supabase/migrations/202607190001_site_sharing.sql`
-2. 初期現場: `supabase/bootstrap/202607190002_bootstrap_first_site.sql`
-3. 検証: `supabase/verification/202607190003_security_verification.sql`
-4. 問題時のみ: `supabase/rollback/202607190099_rollback_site_sharing.sql`
+2. join_site前進修正: `supabase/migrations/202607190004_fix_join_site_ambiguity.sql`
+3. 初期現場: `supabase/bootstrap/202607190002_bootstrap_first_site.sql`
+4. 検証: `supabase/verification/202607190003_security_verification.sql`
+5. 問題時のみ: `supabase/rollback/202607190099_rollback_site_sharing.sql`
 
-SQLはSupabase Dashboardの **SQL Editor > New query** で、上記の順に1ファイルずつ実行します。基盤migrationは1回だけ実行します。2回目は変更前の事前判定で停止する設計です。
+SQLはSupabase Dashboardの **SQL Editor > New query** で、上記の順に1ファイルずつ実行します。基盤migrationは1回だけ実行します。2回目は変更前の事前判定で停止する設計です。前進修正は、修正済み基盤を適用した新規環境でも安全に同じ関数定義へ置き換えます。
 
 ## 実行前チェックリスト
 

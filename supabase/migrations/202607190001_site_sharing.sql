@@ -327,7 +327,8 @@ begin
   delete from public.site_join_attempts where user_id = v_user;
   insert into public.site_members(site_id, user_id, role, device_name, active, last_seen_at)
   values (v_site.id, v_user, v_code.grant_role, left(coalesce(nullif(trim(p_device_name), ''), '名称未設定端末'), 80), true, v_now)
-  on conflict (site_id, user_id) do update set device_name = excluded.device_name, last_seen_at = v_now;
+  on conflict on constraint site_members_site_id_user_id_key
+  do update set device_name = excluded.device_name, last_seen_at = v_now;
   insert into public.audit_logs(site_id, actor_user_id, action, entity_type, entity_id)
   values (v_site.id, v_user, 'site.join', 'site_member', v_user);
   return query select v_site.id, v_site.site_code, v_site.name,

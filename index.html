@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#1855a0">
   <title>aoALB 工事写真台帳</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231855a0'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-size='34' font-family='Arial' font-weight='700' fill='white'%3EA%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="css/app.css">
   <link rel="stylesheet" href="css/print.css" media="print">
 </head>
@@ -117,11 +118,17 @@
       <div class="ledger-toolbar">
         <button id="ledger-auto" type="button" class="secondary">撮影日時順に自動配置</button>
         <button id="ledger-add-page" type="button" class="secondary">空ページを追加</button>
+        <fieldset class="ledger-view-switch" aria-label="台帳の表示方法">
+          <legend>表示</legend>
+          <label><input type="radio" name="ledger-view-mode" value="single" checked>1頁</label>
+          <label><input type="radio" name="ledger-view-mode" value="spread">見開き</label>
+        </fieldset>
+        <span id="ledger-view-note" class="ledger-view-note" hidden>画面幅が狭いため1頁表示になります。</span>
         <button id="ledger-print" type="button" class="primary" disabled>印刷／PDF保存</button>
         <span id="ledger-save-status" class="ledger-save-status" role="status" aria-live="polite"></span>
       </div>
       <div class="ledger-mobile-tabs" role="tablist" aria-label="台帳編集表示">
-        <button id="ledger-tab-photos" type="button" role="tab" aria-selected="true">写真</button>
+        <button id="ledger-tab-photos" type="button" role="tab" aria-selected="true">写真 <span id="ledger-mobile-unplaced">0</span></button>
         <button id="ledger-tab-pages" type="button" role="tab" aria-selected="false">台帳</button>
       </div>
       <div id="ledger-workspace" class="ledger-workspace" data-mobile-pane="photos">
@@ -154,6 +161,40 @@
       <div class="detail-image-wrap"><img id="detail-image" alt="工事写真"></div>
       <div id="detail-fields" class="detail-fields"></div>
     </div>
+  </dialog>
+
+  <dialog id="caption-editor" class="caption-editor">
+    <form id="caption-editor-form" method="dialog">
+      <div class="dialog-header"><h2>台帳文言を編集</h2><button id="caption-editor-close" type="button" aria-label="閉じる">×</button></div>
+      <div class="caption-editor-body">
+        <p id="caption-editor-photo" class="caption-editor-photo"></p>
+        <div class="caption-editor-field" data-caption-field="koushu">
+          <label for="caption-koushu">工種欄</label>
+          <input id="caption-koushu" type="text" maxlength="200">
+          <p class="caption-auto-value"></p>
+          <div class="caption-field-actions"><button type="button" class="secondary" data-caption-auto="koushu">自動文言に戻す</button><button type="button" class="secondary" data-caption-blank="koushu">空欄にする</button></div>
+        </div>
+        <div class="caption-editor-field" data-caption-field="sokuten">
+          <label for="caption-sokuten">測点欄</label>
+          <input id="caption-sokuten" type="text" maxlength="200">
+          <p class="caption-auto-value"></p>
+          <div class="caption-field-actions"><button type="button" class="secondary" data-caption-auto="sokuten">自動文言に戻す</button><button type="button" class="secondary" data-caption-blank="sokuten">空欄にする</button></div>
+        </div>
+        <div class="caption-editor-field" data-caption-field="text">
+          <label for="caption-text">台帳文欄</label>
+          <textarea id="caption-text" rows="6" maxlength="1000"></textarea>
+          <p class="caption-auto-value"></p>
+          <div class="caption-field-actions"><button type="button" class="secondary" data-caption-auto="text">自動文言に戻す</button><button type="button" class="secondary" data-caption-blank="text">空欄にする</button></div>
+        </div>
+        <p id="caption-editor-error" class="caption-editor-error" role="alert" hidden></p>
+      </div>
+      <div class="caption-editor-footer">
+        <button id="caption-editor-reset" type="button" class="secondary">すべて自動文言に戻す</button>
+        <span class="caption-editor-spacer"></span>
+        <button id="caption-editor-cancel" type="button" class="secondary">キャンセル</button>
+        <button id="caption-editor-save" type="submit" class="primary">保存</button>
+      </div>
+    </form>
   </dialog>
 
   <script src="vendor/jszip.min.js"></script>

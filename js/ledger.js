@@ -2,10 +2,15 @@ import {
   getProjects, getPhotosByProjectUid, getPhotoFile,
   getLedgersByProjectId, getLedger, saveLedger
 } from "./storage.js";
-import { PRINT_TEMPLATE, renderLedgerPages, validateLedgerPages, printLedger } from "./print.js";
+import {
+  PRINT_TEMPLATE, automaticCaptionFields, renderLedgerPages,
+  validateLedgerPages, printLedger
+} from "./print.js";
 
-export const LEDGER_SCHEMA_VERSION = 1;
+export const LEDGER_SCHEMA_VERSION = 2;
 export const blankSlot = () => ({ type: "blank" });
+export const CAPTION_LIMITS = Object.freeze({ koushu: 200, sokuten: 200, text: 1000 });
+export const LEDGER_VIEW_KEY = "aoALB:ledgerViewMode";
 
 const clone = value => structuredClone(value);
 
@@ -13,6 +18,26 @@ function normalizeSlot(slot) {
   return slot?.type === "photo" && typeof slot.photoId === "string" && slot.photoId
     ? { type: "photo", photoId: slot.photoId }
     : blankSlot();
+}
+
+function normalizeCaptionOverride(value) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const normalized = {};
+  for (const key of Object.keys(CAPTION_LIMITS)) {
+    normalized[key] = source[key] === null || source[key] === undefined
+      ? null
+      : typeof source[key] === "string" ? source[key] : null;
+  }
+  return normalized;
+}
+
+function normalizeCaptionOverrides(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const result = {};
+  for (const [photoId, override] of Object.entries(value)) {
+    if (typeof photoId === "string" && photoId) result[photoId] = normalizeCaptionOverride(override);
+  }
+  return result;
 }
 
 export function pagesFromSlots(slots) {
@@ -40,6 +65,7 @@ export function normalizeLedger(value) {
     title: String(value?.title || "施工状況写真"),
     template: PRINT_TEMPLATE,
     showCover: value?.showCover !== false,
+    captionOverrides: normalizeCaptionOverrides(value?.captionOverrides),
     pages,
     createdAt: value?.createdAt || now,
     updatedAt: value?.updatedAt || now
@@ -58,6 +84,23 @@ export function assertUniquePhotos(ledger) {
   const ids = placedPhotoIds(ledger);
   if (new Set(ids).size !== ids.length) throw new Error("同じ写真を1つの台帳へ重複配置できません。");
   return true;
+}
+
+export function captionOverrideFor(ledger, photoId) {
+  return normalizeCaptionOverride(ledger?.captionOverrides?.[photoId]);
+}
+
+export function setCaptionOverride(ledger, photoId, override) {
+  if (!photoId) throw new Error("写真を特定できません。");
+  const normalized = normalizeCaptionOverride(override);
+  for (const [key, limit] of Object.entries(CAPTION_LIMITS)) {
+    if ([...String(normalized[key] ?? "")].length > limit) throw new Error(`${key}の文字数が上限を超えています。`);
+  }
+  const next = clone(ledger);
+  next.captionOverrides ||= {};
+  if (Object.values(normalized).every(value => value === null)) delete next.captionOverrides[photoId];
+  else next.captionOverrides[photoId] = normalized;
+  return next;
 }
 
 function withSlots(ledger, slots) {
@@ -156,9 +199,16 @@ export function initLedgerEditor() {
     project: byId("ledger-project"), select: byId("ledger-select"), create: byId("ledger-new"),
     title: byId("ledger-title"), showCover: byId("ledger-show-cover"), auto: byId("ledger-auto"),
     addPage: byId("ledger-add-page"), print: byId("ledger-print"), status: byId("ledger-save-status"),
+    viewModes: [...document.querySelectorAll('input[name="ledger-view-mode"]')], viewNote: byId("ledger-view-note"),
     workspace: byId("ledger-workspace"), photoList: byId("ledger-photo-list"), unplacedCount: byId("ledger-unplaced-count"),
     empty: byId("ledger-photo-empty"), pages: byId("ledger-pages"), guide: byId("ledger-empty-guide"),
     warnings: byId("ledger-warning-panel"), tabPhotos: byId("ledger-tab-photos"), tabPages: byId("ledger-tab-pages"),
+    mobileUnplaced: byId("ledger-mobile-unplaced"),
+    captionDialog: byId("caption-editor"), captionForm: byId("caption-editor-form"),
+    captionPhoto: byId("caption-editor-photo"), captionError: byId("caption-editor-error"),
+    captionClose: byId("caption-editor-close"), captionCancel: byId("caption-editor-cancel"),
+    captionReset: byId("caption-editor-reset"), captionSave: byId("caption-editor-save"),
+    captionInputs: { koushu: byId("caption-koushu"), sokuten: byId("caption-sokuten"), text: byId("caption-text") },
     filters: {
       koushu: byId("ledger-filter-koushu"), shubetsu: byId("ledger-filter-shubetsu"),
       saibetsu: byId("ledger-filter-saibetsu"), sokuten: byId("ledger-filter-sokuten"),
@@ -178,6 +228,10 @@ export function initLedgerEditor() {
   let libraryUrls = new Set();
   let libraryObserver = null;
   let validation = { valid: false, empty: true, issues: [] };
+  let viewMode = localStorage.getItem(LEDGER_VIEW_KEY) === "spread" ? "spread" : "single";
+  let captionEditor = null;
+  const mobileScroll = { photos: 0, pages: 0 };
+  const narrowScreen = window.matchMedia("(max-width: 900px)");
 
   function status(message, error = false) {
     ui.status.textContent = message;
@@ -192,6 +246,56 @@ export function initLedgerEditor() {
 
   function selectedProjectUid() {
     return ui.project.value;
+  }
+
+  function effectiveViewMode() {
+    return viewMode === "spread" && !narrowScreen.matches ? "spread" : "single";
+  }
+
+  function applyViewMode() {
+    const effective = effectiveViewMode();
+    ui.pages.dataset.layout = effective;
+    ui.viewNote.hidden = !(viewMode === "spread" && narrowScreen.matches);
+    for (const control of ui.viewModes) {
+      control.checked = control.value === effective;
+      control.disabled = control.value === "spread" && narrowScreen.matches;
+    }
+  }
+
+  function photoById(photoId) {
+    return photos.find(photo => photo.internalId === photoId) || null;
+  }
+
+  function closeCaptionEditor() {
+    captionEditor = null;
+    if (ui.captionDialog.open) ui.captionDialog.close();
+  }
+
+  function setCaptionEditorField(key, mode, value) {
+    if (!captionEditor) return;
+    captionEditor.modes[key] = mode;
+    ui.captionInputs[key].value = value;
+    ui.captionInputs[key].dataset.mode = mode;
+    ui.captionInputs[key].closest(".caption-editor-field")?.classList.toggle("uses-automatic", mode === "auto");
+  }
+
+  function openCaptionEditor(slotIndex) {
+    const slot = flattenSlots(currentLedger)[slotIndex];
+    const photo = slot?.type === "photo" ? photoById(slot.photoId) : null;
+    if (!photo) return;
+    const automatic = automaticCaptionFields(photo);
+    const existing = currentLedger.captionOverrides?.[photo.internalId] || {};
+    captionEditor = { slotIndex, photoId: photo.internalId, automatic, modes: {} };
+    ui.captionPhoto.textContent = `写真枠${slotIndex + 1}：${photo.ledger?.title || photo.classification?.saibetsu || "台帳文なし"}`;
+    ui.captionError.hidden = true;
+    for (const key of Object.keys(CAPTION_LIMITS)) {
+      const overridden = Object.prototype.hasOwnProperty.call(existing, key) && existing[key] !== null;
+      setCaptionEditorField(key, overridden ? "override" : "auto", overridden ? existing[key] : automatic[key]);
+      const note = ui.captionInputs[key].closest(".caption-editor-field")?.querySelector(".caption-auto-value");
+      if (note) note.textContent = `自動文言：${automatic[key] || "（空欄）"}`;
+    }
+    ui.captionDialog.showModal();
+    ui.captionInputs.koushu.focus();
   }
 
   function renderProjectOptions(preferredUid = "") {
@@ -250,6 +354,7 @@ export function initLedgerEditor() {
     clearLibraryUrls();
     const available = filteredUnplaced();
     ui.unplacedCount.textContent = `${available.length}枚`;
+    ui.mobileUnplaced.textContent = String(available.length);
     const cards = available.map(photo => {
       const card = element("button", `ledger-photo-card${selectedPhotoId === photo.internalId ? " selected" : ""}`);
       card.type = "button";
@@ -297,7 +402,13 @@ export function initLedgerEditor() {
     const list = document.createElement("ul");
     for (const issue of result.issues) {
       const fields = issue.fields.map(field => `${field.label}（${field.count}文字）`).join("、");
-      list.append(element("li", "", `写真枠${issue.index + 1}: ${fields}`));
+      const item = element("li");
+      item.append(document.createTextNode(`写真枠${issue.index + 1}: ${fields} `));
+      const edit = element("button", "ledger-warning-edit", "文言を編集");
+      edit.type = "button";
+      edit.addEventListener("click", () => openCaptionEditor(issue.index));
+      item.append(edit);
+      list.append(item);
     }
     ui.warnings.append(list);
     ui.warnings.hidden = false;
@@ -310,6 +421,7 @@ export function initLedgerEditor() {
         event.stopPropagation();
         const index = Number(button.dataset.slotIndex);
         const action = button.dataset.ledgerAction;
+        if (action === "edit-caption") return openCaptionEditor(index);
         if (action === "move-prev") mutate(ledger => moveSlot(ledger, index, -1));
         if (action === "move-next") mutate(ledger => moveSlot(ledger, index, 1));
         if (action === "blank-before") mutate(ledger => insertBlank(ledger, index));
@@ -354,6 +466,16 @@ export function initLedgerEditor() {
     }
   }
 
+  async function validatePreview() {
+    const layout = ui.pages.dataset.layout || "single";
+    if (layout === "spread") ui.pages.dataset.layout = "single";
+    try {
+      return await validateLedgerPages(ui.pages, photos, currentLedger);
+    } finally {
+      ui.pages.dataset.layout = layout;
+    }
+  }
+
   async function renderPreview() {
     releaseUrls(previewUrls);
     if (!currentLedger || !currentProject) {
@@ -369,7 +491,8 @@ export function initLedgerEditor() {
     });
     previewUrls = rendered.objectUrls;
     bindPreviewActions();
-    renderWarnings(await validateLedgerPages(ui.pages, photos));
+    applyViewMode();
+    renderWarnings(await validatePreview());
   }
 
   async function renderAll() {
@@ -384,7 +507,7 @@ export function initLedgerEditor() {
     await renderPreview();
   }
 
-  function mutate(transform) {
+  function mutate(transform, { preserveSelection = false } = {}) {
     const requestedLedgerId = currentLedger?.internalId || "";
     const run = async () => {
       if (!currentLedger || currentLedger.internalId !== requestedLedgerId) return false;
@@ -401,7 +524,7 @@ export function initLedgerEditor() {
         const listIndex = ledgers.findIndex(item => item.internalId === transformed.internalId);
         if (listIndex >= 0) ledgers[listIndex] = clone(transformed);
         else ledgers.push(clone(transformed));
-        selectedSlotIndex = -1;
+        if (!preserveSelection) selectedSlotIndex = -1;
         await renderAll();
         status("保存しました");
         return true;
@@ -441,6 +564,7 @@ export function initLedgerEditor() {
 
   function deactivate() {
     active = false;
+    closeCaptionEditor();
     releaseUrls(previewUrls);
     clearLibraryUrls();
   }
@@ -475,10 +599,21 @@ export function initLedgerEditor() {
   ui.auto.addEventListener("click", () => mutate(ledger => autoArrangeLedger(ledger, photos)));
   ui.addPage.addEventListener("click", () => mutate(addBlankPage));
   ui.print.addEventListener("click", async () => {
-    renderWarnings(await validateLedgerPages(ui.pages, photos));
+    const result = await validatePreview();
+    renderWarnings(result);
     if (!validation.valid) return status("印刷できない項目があります。警告内容を確認してください。", true);
-    await printLedger(ui.pages, photos);
+    await printLedger(ui.pages, photos, currentLedger, result);
   });
+  for (const control of ui.viewModes) {
+    control.addEventListener("change", () => {
+      if (!control.checked) return;
+      viewMode = control.value === "spread" ? "spread" : "single";
+      localStorage.setItem(LEDGER_VIEW_KEY, viewMode);
+      applyViewMode();
+    });
+  }
+  if (narrowScreen.addEventListener) narrowScreen.addEventListener("change", applyViewMode);
+  else narrowScreen.addListener(applyViewMode);
   for (const key of ["koushu", "shubetsu", "saibetsu", "sokuten"]) ui.filters[key].addEventListener("change", renderLibrary);
   ui.filters.search.addEventListener("input", renderLibrary);
   ui.clearFilters.addEventListener("click", () => {
@@ -487,12 +622,61 @@ export function initLedgerEditor() {
     renderLibrary();
   });
   function setMobilePane(pane) {
+    const previous = ui.workspace.dataset.mobilePane || "photos";
+    mobileScroll[previous] = window.scrollY;
     ui.workspace.dataset.mobilePane = pane;
     ui.tabPhotos.setAttribute("aria-selected", String(pane === "photos"));
     ui.tabPages.setAttribute("aria-selected", String(pane === "pages"));
+    requestAnimationFrame(() => window.scrollTo({ top: mobileScroll[pane] || 0, behavior: "auto" }));
   }
   ui.tabPhotos.addEventListener("click", () => setMobilePane("photos"));
   ui.tabPages.addEventListener("click", () => setMobilePane("pages"));
+  for (const [key, input] of Object.entries(ui.captionInputs)) {
+    input.addEventListener("input", () => {
+      if (!captionEditor) return;
+      captionEditor.modes[key] = "override";
+      input.dataset.mode = "override";
+      input.closest(".caption-editor-field")?.classList.remove("uses-automatic");
+    });
+  }
+  for (const button of document.querySelectorAll("[data-caption-auto]")) {
+    button.addEventListener("click", () => {
+      const key = button.dataset.captionAuto;
+      if (captionEditor && key in CAPTION_LIMITS) setCaptionEditorField(key, "auto", captionEditor.automatic[key]);
+    });
+  }
+  for (const button of document.querySelectorAll("[data-caption-blank]")) {
+    button.addEventListener("click", () => {
+      const key = button.dataset.captionBlank;
+      if (captionEditor && key in CAPTION_LIMITS) setCaptionEditorField(key, "override", "");
+    });
+  }
+  ui.captionReset.addEventListener("click", () => {
+    if (!captionEditor) return;
+    for (const key of Object.keys(CAPTION_LIMITS)) setCaptionEditorField(key, "auto", captionEditor.automatic[key]);
+  });
+  ui.captionClose.addEventListener("click", closeCaptionEditor);
+  ui.captionCancel.addEventListener("click", closeCaptionEditor);
+  ui.captionForm.addEventListener("submit", event => {
+    event.preventDefault();
+    if (!captionEditor) return;
+    const { photoId, slotIndex, modes } = captionEditor;
+    const override = {};
+    for (const [key, limit] of Object.entries(CAPTION_LIMITS)) {
+      const value = ui.captionInputs[key].value;
+      if ([...value].length > limit) {
+        ui.captionError.textContent = `${key === "text" ? "台帳文" : key === "koushu" ? "工種" : "測点"}は${limit}文字以内で入力してください。`;
+        ui.captionError.hidden = false;
+        return;
+      }
+      override[key] = modes[key] === "auto" ? null : value;
+    }
+    closeCaptionEditor();
+    selectedSlotIndex = slotIndex;
+    mutate(ledger => setCaptionOverride(ledger, photoId, override), { preserveSelection: true });
+  });
+  ui.captionDialog.addEventListener("cancel", event => { event.preventDefault(); closeCaptionEditor(); });
+  applyViewMode();
   window.addEventListener("beforeunload", () => { releaseUrls(previewUrls); clearLibraryUrls(); });
 
   return { activate, deactivate, get active() { return active; } };

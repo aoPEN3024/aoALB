@@ -126,7 +126,8 @@ create temp table security_test_context (
   project_id uuid not null,
   outsider_user_id uuid not null,
   second_site_id uuid not null,
-  photo_id uuid not null
+  photo_id uuid not null,
+  ledger_id uuid not null
 ) on commit drop;
 
 create temp table security_test_results (
@@ -155,6 +156,8 @@ declare
   v_project_id uuid := pg_catalog.gen_random_uuid();
   v_second_site_id uuid := pg_catalog.gen_random_uuid();
   v_photo_id uuid := pg_catalog.gen_random_uuid();
+  v_ledger_id uuid := pg_catalog.gen_random_uuid();
+  v_page_id uuid := pg_catalog.gen_random_uuid();
 begin
   select m.site_id, m.user_id into v_site_id, v_admin_user_id
   from public.site_members m
@@ -170,8 +173,20 @@ begin
   insert into public.sites(id, site_code, name, created_by)
   values (v_second_site_id, 'RLS_TEST_' || upper(substr(replace(v_second_site_id::text, '-', ''), 1, 8)), 'RLS別現場（一時）', v_admin_user_id);
 
+  insert into public.ledgers(id, site_id, project_id, ledger_uid, title)
+  values (v_ledger_id, v_site_id, v_project_id, pg_catalog.gen_random_uuid(), 'RLS検証用台帳（一時）');
+  insert into public.ledger_pages(id, site_id, ledger_id, page_index)
+  values (v_page_id, v_site_id, v_ledger_id, 0);
+  insert into public.ledger_slots(site_id, page_id, slot_index, slot_type)
+  values (v_site_id, v_page_id, 0, 'blank');
+
+  insert into public.sync_events(event_id, site_id, actor_user_id, device_name, entity_type, entity_id, event_type)
+  values
+    (pg_catalog.gen_random_uuid(), v_site_id, v_admin_user_id, 'RLS検証', 'verification', v_project_id, 'own-site'),
+    (pg_catalog.gen_random_uuid(), v_second_site_id, v_admin_user_id, 'RLS検証', 'verification', v_second_site_id, 'other-site');
+
   insert into pg_temp.security_test_context
-  values (v_site_id, v_admin_user_id, v_project_id, pg_catalog.gen_random_uuid(), v_second_site_id, v_photo_id);
+  values (v_site_id, v_admin_user_id, v_project_id, pg_catalog.gen_random_uuid(), v_second_site_id, v_photo_id, v_ledger_id);
 end
 $fixtures$;
 
@@ -182,6 +197,33 @@ set local role authenticated;
 insert into pg_temp.security_test_results
 select 'admin sees own site', count(*) = 1, 'expected 1 row, got ' || count(*)
 from public.sites where id = (select site_id from pg_temp.security_test_context);
+insert into pg_temp.security_test_results
+select 'admin cannot see other site', count(*) = 0, 'visible rows: ' || count(*)
+from public.sites where id = (select second_site_id from pg_temp.security_test_context);
+insert into pg_temp.security_test_results
+select 'admin receives own realtime rows only', count(*) = 1, 'visible rows: ' || count(*)
+from public.sync_events;
+insert into pg_temp.security_test_results
+select 'admin can manage membership', public.set_site_member_active(
+  (select site_id from pg_temp.security_test_context),
+  (select admin_user_id from pg_temp.security_test_context),
+  true
+), 'set_site_member_active returned true';
+do $admin_role_from_code$
+begin
+  begin
+    perform public.rotate_site_join_code(
+      (select site_id from pg_temp.security_test_context),
+      'AdminRoleCheck01',
+      'admin'
+    );
+    insert into pg_temp.security_test_results values ('join code cannot grant admin', false, 'admin role was accepted');
+  exception when others then
+    insert into pg_temp.security_test_results
+    values ('join code cannot grant admin', sqlerrm = 'admin_role_not_allowed', sqlerrm);
+  end;
+end
+$admin_role_from_code$;
 reset role;
 
 -- Viewer can read its site but cannot update project data.
@@ -191,11 +233,47 @@ set local role authenticated;
 insert into pg_temp.security_test_results
 select 'viewer sees own site', count(*) = 1, 'expected 1 row, got ' || count(*)
 from public.sites where id = (select site_id from pg_temp.security_test_context);
+insert into pg_temp.security_test_results
+select 'viewer sees own project', count(*) = 1, 'visible rows: ' || count(*)
+from public.projects where id = (select project_id from pg_temp.security_test_context);
+insert into pg_temp.security_test_results
+select 'viewer sees own photo', count(*) = 1, 'visible rows: ' || count(*)
+from public.photos where id = (select photo_id from pg_temp.security_test_context);
+insert into pg_temp.security_test_results
+select 'viewer sees own ledger', count(*) = 1, 'visible rows: ' || count(*)
+from public.ledgers where id = (select ledger_id from pg_temp.security_test_context);
+insert into pg_temp.security_test_results
+select 'viewer receives own realtime rows only', count(*) = 1, 'visible rows: ' || count(*)
+from public.sync_events;
 with changed as (
   update public.projects set name = name where id = (select project_id from pg_temp.security_test_context) returning 1
 )
 insert into pg_temp.security_test_results
 select 'viewer cannot update project', count(*) = 0, 'updated rows: ' || count(*) from changed;
+with changed as (
+  update public.photos set metadata = metadata where id = (select photo_id from pg_temp.security_test_context) returning 1
+)
+insert into pg_temp.security_test_results
+select 'viewer cannot update photo', count(*) = 0, 'updated rows: ' || count(*) from changed;
+with changed as (
+  delete from public.ledgers where id = (select ledger_id from pg_temp.security_test_context) returning 1
+)
+insert into pg_temp.security_test_results
+select 'viewer cannot delete ledger', count(*) = 0, 'deleted rows: ' || count(*) from changed;
+do $viewer_admin_rpc$
+begin
+  begin
+    perform public.set_site_member_active(
+      (select site_id from pg_temp.security_test_context),
+      (select admin_user_id from pg_temp.security_test_context),
+      true
+    );
+    insert into pg_temp.security_test_results values ('viewer cannot use admin RPC', false, 'admin RPC succeeded');
+  exception when others then
+    insert into pg_temp.security_test_results values ('viewer cannot use admin RPC', sqlerrm = 'not_allowed', sqlerrm);
+  end;
+end
+$viewer_admin_rpc$;
 reset role;
 
 -- Editor can update its own site's project.
@@ -207,6 +285,43 @@ with changed as (
 )
 insert into pg_temp.security_test_results
 select 'editor can update own project', count(*) = 1, 'updated rows: ' || count(*) from changed;
+with changed as (
+  update public.photos set metadata = jsonb_build_object('verification', true)
+  where id = (select photo_id from pg_temp.security_test_context) returning 1
+)
+insert into pg_temp.security_test_results
+select 'editor can update own photo', count(*) = 1, 'updated rows: ' || count(*) from changed;
+with changed as (
+  update public.ledgers set title = title where id = (select ledger_id from pg_temp.security_test_context) returning 1
+)
+insert into pg_temp.security_test_results
+select 'editor can update own ledger', count(*) = 1, 'updated rows: ' || count(*) from changed;
+with created as (
+  insert into public.projects(site_id, project_uid, name, contractor)
+  values ((select site_id from pg_temp.security_test_context), pg_catalog.gen_random_uuid(), 'editor追加検証（一時）', '')
+  returning 1
+)
+insert into pg_temp.security_test_results
+select 'editor can insert project metadata', count(*) = 1, 'inserted rows: ' || count(*) from created;
+with changed as (
+  delete from public.photos where id = (select photo_id from pg_temp.security_test_context) returning 1
+)
+insert into pg_temp.security_test_results
+select 'editor cannot delete photo', count(*) = 0, 'deleted rows: ' || count(*) from changed;
+do $editor_admin_rpc$
+begin
+  begin
+    perform public.set_site_member_active(
+      (select site_id from pg_temp.security_test_context),
+      (select admin_user_id from pg_temp.security_test_context),
+      true
+    );
+    insert into pg_temp.security_test_results values ('editor cannot use admin RPC', false, 'admin RPC succeeded');
+  exception when others then
+    insert into pg_temp.security_test_results values ('editor cannot use admin RPC', sqlerrm = 'not_allowed', sqlerrm);
+  end;
+end
+$editor_admin_rpc$;
 reset role;
 
 -- A valid but unaffiliated JWT subject sees zero sites.
@@ -215,6 +330,14 @@ select set_config('request.jwt.claims', json_build_object('sub', (select outside
 set local role authenticated;
 insert into pg_temp.security_test_results
 select 'unaffiliated user sees zero sites', count(*) = 0, 'visible rows: ' || count(*) from public.sites;
+insert into pg_temp.security_test_results
+select 'unaffiliated user sees zero projects', count(*) = 0, 'visible rows: ' || count(*) from public.projects;
+insert into pg_temp.security_test_results
+select 'unaffiliated user sees zero photos', count(*) = 0, 'visible rows: ' || count(*) from public.photos;
+insert into pg_temp.security_test_results
+select 'unaffiliated user sees zero ledgers', count(*) = 0, 'visible rows: ' || count(*) from public.ledgers;
+insert into pg_temp.security_test_results
+select 'unaffiliated user receives zero realtime rows', count(*) = 0, 'visible rows: ' || count(*) from public.sync_events;
 reset role;
 
 -- Five invalid join attempts block the user globally, even with an unknown site code.

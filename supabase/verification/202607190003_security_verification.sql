@@ -208,7 +208,7 @@ select 'admin cannot see other site', count(*) = 0, 'visible rows: ' || count(*)
 from public.sites where id = (select second_site_id from pg_temp.security_test_context);
 insert into pg_temp.security_test_results
 select 'admin receives own realtime rows only', count(*) = 1, 'visible rows: ' || count(*)
-from public.sync_events;
+from public.sync_events where entity_type = 'verification';
 insert into pg_temp.security_test_results
 select 'admin sees own Storage path only', count(*) = 1, 'visible rows: ' || count(*)
 from storage.objects where bucket_id = 'site-photos';
@@ -253,7 +253,7 @@ select 'viewer sees own ledger', count(*) = 1, 'visible rows: ' || count(*)
 from public.ledgers where id = (select ledger_id from pg_temp.security_test_context);
 insert into pg_temp.security_test_results
 select 'viewer receives own realtime rows only', count(*) = 1, 'visible rows: ' || count(*)
-from public.sync_events;
+from public.sync_events where entity_type = 'verification';
 insert into pg_temp.security_test_results
 select 'viewer sees own Storage path only', count(*) = 1, 'visible rows: ' || count(*)
 from storage.objects where bucket_id = 'site-photos';

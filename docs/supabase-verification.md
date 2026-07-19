@@ -37,3 +37,16 @@
 - オフライン時はpending、復帰後はsyncedになる
 
 実写真と台帳同期は、このSQL検証と手動確認がすべて通った後の別段階です。
+
+## aoCLOUD実環境検証結果（2026-07-19）
+
+- 基盤migrationと初期bootstrapを空のプロジェクトへ適用できた。
+- 12テーブル、全テーブルRLS、業務31件＋Storage 4件のpolicy、非公開`site-photos`、Realtime対象`sync_events`を確認した。
+- ブラウザ用RPCは4件だけが`authenticated`へ許可され、不要なPUBLIC EXECUTEと永続bootstrap関数がないことを確認した。
+- 38件のSQL検証が全件成功した。admin・editor・viewer・未所属、現場分離、複合外部キー、Storageメタデータ、Realtime行分離を含む。
+- 実ブラウザで匿名認証、正しいコードでのeditor参加、viewer更新拒否、editor送信、管理者による端末無効化、同一現場Realtime受信を確認した。
+- 誤った参加コードを現場IDを変えて5回試行すると15分停止され、正しい現場IDとコードへ戻しても停止を回避できないことを確認した。
+- 実写真はアップロードしていない。Storageは非公開設定、policy、パス制約、メタデータRLSを検証した。
+- 検証用匿名ユーザー2件、同期イベント2件、参加試行1件、関連監査ログ3件を承認後に削除した。初期現場`AOYAMA_TEST`と管理端末だけを残した。
+
+実ブラウザ参加時に`join_site`の`site_id`が出力列と競合する不具合を検出した。`ON CONFLICT ON CONSTRAINT site_members_site_id_user_id_key`へ修正し、既適用環境向けに`202607190004_fix_join_site_ambiguity.sql`を追加して再検証済みである。

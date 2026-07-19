@@ -77,6 +77,8 @@
 - アップロード完了前にaoPICの端末内JPEGを削除しない
 - 初期PRはテスト用メタデータだけを送り、実写真は送らない
 
+写真JPEGの通信量制御、回線判定、端末別設定、アップロードキュー、サムネイルとキャッシュの正式仕様は[`photo-sync-spec.md`](photo-sync-spec.md)を参照する。初期値は`wifi_only`であり、Wi-FiまたはEthernetを明確に判定できない限り自動送信しない。写真本体同期はこのPRへ含めず、RLS実環境検証後の別Draft PRで実装する。
+
 ## 7. Realtimeと競合
 
 初期接続試験は`sync_events`のPostgres Changesを使用する。RLSにより所属現場のイベントだけを受信する。規模拡大時はSupabaseが推奨するBroadcast方式への移行を検討する。

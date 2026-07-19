@@ -44,6 +44,7 @@ python -m http.server 8000
 - 1頁／見開きの表示設定は`aoALB:ledgerViewMode`へ保存し、台帳配置データや印刷順には影響しません。
 - 現場共有は初期試作です。Supabase未設定時は外部通信せず、従来のローカル機能だけが動作します。
 - 実写真と台帳のクラウド同期はまだ行いません。現在の同期対象は接続確認用メタデータだけです。
+- 写真同期の通信量制御仕様は[`docs/photo-sync-spec.md`](docs/photo-sync-spec.md)に定義しています。初期値はWi-Fi確認時のみで、回線不明時やモバイル通信では自動送信しません。写真本体同期は別Draft PRで実装します。
 - service role key、DBパスワード、参加コードをリポジトリへ保存しません。
 - Supabaseのローカル検証手順は[`docs/supabase-setup.md`](docs/supabase-setup.md)を参照してください。接続設定はgit管理外の`config/cloud.local.json`へ保存し、Publishable keyだけを使用します。
 

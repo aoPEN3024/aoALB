@@ -1,5 +1,6 @@
 const MOCK_EVENT_PREFIX = "aoALB:mockEvents:";
 const MOCK_CHANNEL = "aoALB:site-sharing-mock";
+const MOCK_PHOTO_PREFIX = "aoALB:mockPhotos:";
 
 function siteIdFor(code) {
   const bytes = new TextEncoder().encode(String(code).toUpperCase());
@@ -33,6 +34,23 @@ export class MockSiteProvider {
     localStorage.setItem(key, JSON.stringify(existing.slice(-100)));
     this.channel?.postMessage(event);
     return event;
+  }
+
+  async uploadPhotoPackage(photoPackage) {
+    if (!photoPackage?.photo?.photoUid || !photoPackage?.photo?.sha256) throw new Error("写真情報が不足しています。");
+    if (photoPackage.originalBlob?.size !== photoPackage.photo.bytes) throw new Error("JPEGのファイル容量が一致しません。");
+    const key = `${MOCK_PHOTO_PREFIX}${photoPackage.siteId}`;
+    const existing = JSON.parse(localStorage.getItem(key) || "[]");
+    const same = existing.find(item => item.photoUid === photoPackage.photo.photoUid);
+    if (same && same.sha256 !== photoPackage.photo.sha256) throw new Error("同じphotoUidのSHA-256が異なります。");
+    if (!same) existing.push({
+      photoUid: photoPackage.photo.photoUid, projectUid: photoPackage.project.projectUid,
+      sha256: photoPackage.photo.sha256, bytes: photoPackage.photo.bytes,
+      thumbnailBytes: photoPackage.thumbnail.bytes, eventId: photoPackage.eventId,
+      syncedAt: new Date().toISOString()
+    });
+    localStorage.setItem(key, JSON.stringify(existing));
+    return { photoUid: photoPackage.photo.photoUid, duplicate: Boolean(same) };
   }
 
   subscribe(siteId, callback) {

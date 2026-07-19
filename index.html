@@ -153,6 +153,42 @@
           <p id="sharing-message" class="sharing-message" role="status" aria-live="polite"></p>
           <ul id="sharing-events" class="sharing-events"></ul>
         </section>
+        <section id="photo-sync-panel" class="sharing-card sharing-wide photo-sync-panel" hidden>
+          <h2>写真同期</h2>
+          <p class="limit-note">写真は端末内に残したまま、1枚ずつ安全に送信します。表示容量はJPEG本体を基にした推定で、実際の通信量は少し増える場合があります。</p>
+          <div class="photo-sync-controls">
+            <label>対象工事
+              <select id="photo-sync-project"></select>
+            </label>
+            <button id="photo-sync-enqueue" type="button" class="secondary">未登録写真を同期対象へ追加</button>
+            <label>同期設定
+              <select id="photo-sync-mode">
+                <option value="wifi_only">Wi-Fi確認時のみ自動同期（推奨）</option>
+                <option value="any_network">すべての回線で自動同期</option>
+                <option value="manual">手動同期のみ</option>
+              </select>
+            </label>
+          </div>
+          <dl class="photo-sync-stats">
+            <div><dt>回線判定</dt><dd id="photo-sync-network">回線不明</dd></div>
+            <div><dt>未送信</dt><dd id="photo-sync-pending-count">0件</dd></div>
+            <div><dt>未送信容量</dt><dd id="photo-sync-pending-bytes">0 bytes</dd></div>
+            <div><dt>同期中</dt><dd id="photo-sync-uploading-count">0件</dd></div>
+            <div><dt>同期済み</dt><dd id="photo-sync-synced-count">0件</dd></div>
+            <div><dt>エラー</dt><dd id="photo-sync-error-count">0件</dd></div>
+            <div><dt>最終同期</dt><dd id="photo-sync-last-time">―</dd></div>
+          </dl>
+          <progress id="photo-sync-progress" max="1" value="0"></progress>
+          <p id="photo-sync-progress-text" class="limit-note">同期対象はありません。</p>
+          <div class="sharing-actions">
+            <button id="photo-sync-now" type="button" class="primary">今すぐ同期</button>
+            <button id="photo-sync-pause" type="button" class="secondary">一時停止</button>
+            <button id="photo-sync-resume" type="button" class="secondary">再開</button>
+            <button id="photo-sync-retry" type="button" class="secondary">エラー写真を再送</button>
+          </div>
+          <p id="photo-sync-note" class="sharing-message" role="status" aria-live="polite"></p>
+          <p class="limit-note">同期中に画面を閉じると未送信が残る場合があります。次回起動時に安全に再開します。</p>
+        </section>
       </div>
     </section>
 

@@ -191,10 +191,10 @@ set local role authenticated;
 insert into pg_temp.security_test_results
 select 'viewer sees own site', count(*) = 1, 'expected 1 row, got ' || count(*)
 from public.sites where id = (select site_id from pg_temp.security_test_context);
-insert into pg_temp.security_test_results
 with changed as (
   update public.projects set name = name where id = (select project_id from pg_temp.security_test_context) returning 1
 )
+insert into pg_temp.security_test_results
 select 'viewer cannot update project', count(*) = 0, 'updated rows: ' || count(*) from changed;
 reset role;
 
@@ -202,10 +202,10 @@ reset role;
 update public.site_members set role = 'editor' where user_id = (select admin_user_id from pg_temp.security_test_context)
   and site_id = (select site_id from pg_temp.security_test_context);
 set local role authenticated;
-insert into pg_temp.security_test_results
 with changed as (
   update public.projects set name = name where id = (select project_id from pg_temp.security_test_context) returning 1
 )
+insert into pg_temp.security_test_results
 select 'editor can update own project', count(*) = 1, 'updated rows: ' || count(*) from changed;
 reset role;
 

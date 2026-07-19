@@ -1,7 +1,8 @@
 import {
-  getProjects, getPhotosByProjectUid, getPhotoFile,
+  getProjects, getPhotosByProjectUid,
   getLedgersByProjectId, getLedger, saveLedger
 } from "./storage.js";
+import { loadPhotoAsset } from "./cloud/receiver.js";
 import {
   PRINT_TEMPLATE, automaticCaptionFields, renderLedgerPages,
   validateLedgerPages, printLedger
@@ -385,7 +386,7 @@ export function initLedgerEditor() {
         if (!entry.isIntersecting) continue;
         const image = entry.target;
         libraryObserver.unobserve(image);
-        getPhotoFile(image.dataset.photoId).then(file => {
+        loadPhotoAsset(image.dataset.photoId, "thumbnail").then(file => {
           if (!file?.blob || !image.isConnected) return;
           const url = URL.createObjectURL(file.blob);
           libraryUrls.add(url);
@@ -444,19 +445,23 @@ export function initLedgerEditor() {
       ui.print.disabled = false;
       return;
     }
-    ui.warnings.append(element("strong", "", "最小文字サイズでも枠内に収まらない項目があります。文字を短くしてください。"));
+    ui.warnings.append(element("strong", "", result.issues.some(issue => issue.asset)
+      ? "印刷に必要な原寸写真がありません。オンラインで取得してから再度確認してください。"
+      : "最小文字サイズでも枠内に収まらない項目があります。文字を短くしてください。"));
     const list = document.createElement("ul");
     for (const issue of result.issues) {
-      const fields = issue.fields.map(field => `${field.label}（${field.count}文字）`).join("、");
+      const fields = issue.fields.map(field => issue.asset ? field.label : `${field.label}（${field.count}文字）`).join("、");
       const item = element("li");
       if (issue.kind === "cover") {
         item.append(document.createTextNode(`表紙: ${fields}`));
       } else {
         item.append(document.createTextNode(`写真枠${issue.index + 1}: ${fields} `));
-        const edit = element("button", "ledger-warning-edit", "文言を編集");
-        edit.type = "button";
-        edit.addEventListener("click", () => openCaptionEditor(issue.index));
-        item.append(edit);
+        if (!issue.asset) {
+          const edit = element("button", "ledger-warning-edit", "文言を編集");
+          edit.type = "button";
+          edit.addEventListener("click", () => openCaptionEditor(issue.index));
+          item.append(edit);
+        }
       }
       list.append(item);
     }
@@ -544,7 +549,8 @@ export function initLedgerEditor() {
     }
     ui.guide.hidden = true;
     const rendered = await renderLedgerPages(ui.pages, {
-      ledger: currentLedger, project: currentProject, photos, loadPhotoFile: getPhotoFile,
+      ledger: currentLedger, project: currentProject, photos,
+      loadPhotoFile: photoId => loadPhotoAsset(photoId, "original", { network: "wifi_only" }),
       interactive: true, selectedSlotIndex
     });
     previewUrls = rendered.objectUrls;

@@ -16,6 +16,18 @@ export async function createSupabaseProvider(config) {
       if (error) throw error;
       return { userId: data.user.id, anonymous: true };
     },
+    async restoreMembership() {
+      const { data, error } = await client.from("site_members")
+        .select("site_id,role,device_name,sites!inner(site_code,name)")
+        .eq("active", true).order("last_seen_at", { ascending: false }).limit(2);
+      if (error) throw error;
+      if (!Array.isArray(data) || data.length !== 1) return null;
+      const row = data[0];
+      return {
+        siteId: row.site_id, siteCode: row.sites?.site_code, siteName: row.sites?.name,
+        role: row.role, deviceName: row.device_name || "名称未設定端末"
+      };
+    },
     async joinSite({ siteCode, joinCode, deviceName }) {
       const { data, error } = await client.rpc("join_site", { p_site_code: siteCode, p_join_code: joinCode, p_device_name: deviceName });
       if (error) throw error;
@@ -147,12 +159,58 @@ export async function createSupabaseProvider(config) {
       await recordSyncEvent(photoRow, completedAt);
       return { photoUid: photo.photoUid, storedAt: completedAt };
     },
+    async listCompletePhotoSnapshot(siteId) {
+      const { data: projects, error: projectError } = await client.from("projects")
+        .select("id,project_uid,kouji_id,name,contractor,updated_at").eq("site_id", siteId);
+      if (projectError) throw projectError;
+      const { data: objects, error: objectError } = await client.from("photo_objects")
+        .select("photo_id,object_path,sha256,bytes,upload_completed_at,thumbnail_object_path,thumbnail_sha256,thumbnail_bytes,thumbnail_width,thumbnail_height")
+        .eq("site_id", siteId).eq("status", "complete").not("upload_completed_at", "is", null);
+      if (objectError) throw objectError;
+      const objectByPhoto = new Map((objects || []).map(row => [row.photo_id, row]));
+      const photoIds = [...objectByPhoto.keys()];
+      const photos = [];
+      for (let offset = 0; offset < photoIds.length; offset += 200) {
+        const { data, error } = await client.from("photos")
+          .select("id,project_id,photo_uid,captured_at,sha256,mime_type,width,height,bytes,metadata,updated_at")
+          .eq("site_id", siteId).in("id", photoIds.slice(offset, offset + 200));
+        if (error) throw error;
+        photos.push(...(data || []));
+      }
+      const normalizedProjects = (projects || []).map(row => ({
+        id: row.id, projectUid: row.project_uid, koujiId: row.kouji_id,
+        name: row.name, contractor: row.contractor, updatedAt: row.updated_at
+      }));
+      const normalizedPhotos = photos.map(row => {
+        const object = objectByPhoto.get(row.id);
+        return {
+          id: row.id, projectId: row.project_id, photoUid: row.photo_uid, capturedAt: row.captured_at,
+          sha256: row.sha256, mimeType: row.mime_type, width: row.width, height: row.height,
+          bytes: Number(row.bytes), metadata: row.metadata, updatedAt: row.updated_at,
+          objectPath: object.object_path, thumbnailPath: object.thumbnail_object_path,
+          thumbnailSha256: object.thumbnail_sha256, thumbnailBytes: Number(object.thumbnail_bytes),
+          thumbnailWidth: object.thumbnail_width, thumbnailHeight: object.thumbnail_height,
+          completedAt: object.upload_completed_at
+        };
+      });
+      return { projects: normalizedProjects, photos: normalizedPhotos };
+    },
+    async downloadPhotoObject(path) {
+      if (typeof path !== "string" || !/^[0-9a-f-]{36}\/(photos|thumbnails)\/[0-9a-f-]{36}\.jpg$/.test(path)) {
+        throw new Error("クラウド写真の保存先が不正です。");
+      }
+      const { data, error } = await client.storage.from("site-photos").download(path);
+      if (error) throw error;
+      if (!(data instanceof Blob)) throw new Error("クラウド写真を取得できませんでした。");
+      return data;
+    },
     subscribe(siteId, callback) {
       channel = client.channel(`site-events:${siteId}`).on("postgres_changes", {
         event: "INSERT", schema: "public", table: "sync_events", filter: `site_id=eq.${siteId}`
       }, payload => callback({
         eventId: payload.new.event_id, siteId: payload.new.site_id, entityId: payload.new.entity_id,
-        deviceName: payload.new.device_name, payload: payload.new.payload, createdAt: payload.new.created_at
+        eventType: payload.new.event_type, deviceName: payload.new.device_name,
+        payload: payload.new.payload, createdAt: payload.new.created_at
       })).subscribe();
       return () => { if (channel) client.removeChannel(channel); channel = null; };
     },

@@ -1,5 +1,6 @@
 const CONFIG_KEY = "aoALB:cloudConfig";
 const LOCAL_CONFIG_PATH = "./config/cloud.local.json";
+const PUBLIC_CONFIG_PATH = "./config/cloud.public.v1.json";
 let localFileConfig = null;
 let localFileChecked = false;
 
@@ -28,17 +29,21 @@ export function validateCloudConfig(input) {
 export async function loadLocalCloudConfig() {
   if (localFileChecked) return localFileConfig;
   localFileChecked = true;
-  if (!['localhost', '127.0.0.1'].includes(location.hostname)) return null;
+  const isLocal = ['localhost', '127.0.0.1'].includes(location.hostname);
+  const configPath = isLocal ? LOCAL_CONFIG_PATH : PUBLIC_CONFIG_PATH;
   let response;
   try {
-    response = await fetch(LOCAL_CONFIG_PATH, { cache: "no-store", credentials: "same-origin" });
+    response = await fetch(configPath, { cache: "no-store", credentials: "same-origin" });
   } catch (_) {
     return null;
   }
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`ローカル接続設定を読み込めませんでした（HTTP ${response.status}）。`);
   let parsed;
-  try { parsed = await response.json(); } catch (_) { throw new Error("config/cloud.local.jsonが正しいJSONではありません。"); }
+  try { parsed = await response.json(); } catch (_) { throw new Error(`${configPath}が正しいJSONではありません。`); }
+  if (!isLocal && (parsed?.schemaVersion !== 1 || parsed?.cloudSharingEnabled !== true)) {
+    throw new Error("公開用クラウド設定が無効、または未対応の形式です。");
+  }
   localFileConfig = validateCloudConfig(parsed);
   return localFileConfig;
 }

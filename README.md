@@ -51,6 +51,8 @@ python -m http.server 8000
 - service role key、DBパスワード、参加コードをリポジトリへ保存しません。
 - Supabaseのローカル検証手順は[`docs/supabase-setup.md`](docs/supabase-setup.md)を参照してください。接続設定はgit管理外の`config/cloud.local.json`へ保存し、Publishable keyだけを使用します。
 - 現場作成専用コードの初回登録・変更・紛失時の手順は[`docs/site-creation-code.md`](docs/site-creation-code.md)を参照してください。平文コードはDB、Git、チャット、アプリ設定へ保存しません。
+- 現段階のクラウド共有は青山塗装社内だけの試験運用です。Turnstileは正式な外部提供前に追加します。公開ページを開いただけでは匿名ユーザーを作らず、「現場共有を開始」を選んだ場合だけAnonymous Sign-Inを行います。RLSと非公開Storageを維持し、現場作成コードまたは参加コードがなければ現場データへ参加できません。
+- 社内試験の監視、緊急停止、現場作成コード漏えい時の対応は[`docs/internal-cloud-trial.md`](docs/internal-cloud-trial.md)、所属のない古い匿名ユーザーの確認と整理は[`docs/anonymous-user-maintenance.md`](docs/anonymous-user-maintenance.md)を参照してください。匿名ユーザーは自動削除しません。
 
 JSZip 3.10.1を`vendor/jszip.min.js`へ同梱しています（MIT/GPLv3 dual license）。
 

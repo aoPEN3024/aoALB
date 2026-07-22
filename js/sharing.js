@@ -15,6 +15,7 @@ import {
 import { getPhotoByUid, getPhotoFile, getPhotosByProjectUid, getProjectByUid, getProjects } from "./storage.js";
 
 const MODE_KEY = "aoALB:sharingMode";
+const AUTH_STORAGE_KEY = "aoALB:supabase-auth";
 const CLOUD_ORIGINAL_MODE_KEY = "aoALB:cloudOriginalMode";
 const shortId = value => value ? `${String(value).slice(0, 8)}…` : "未登録";
 const formatDate = value => value ? new Intl.DateTimeFormat("ja-JP", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "―";
@@ -67,6 +68,15 @@ export function initSiteSharing() {
   function setPhotoMessage(message, error = false) {
     ui.photoNote.textContent = message;
     ui.photoNote.classList.toggle("error", error);
+  }
+
+  function hasStoredAuthSession() {
+    try {
+      const stored = JSON.parse(localStorage.getItem(AUTH_STORAGE_KEY) || "null");
+      return Boolean(stored?.access_token && stored?.refresh_token);
+    } catch (_) {
+      return false;
+    }
   }
 
   function setReceiveMessage(message, error = false) {
@@ -473,7 +483,13 @@ export function initSiteSharing() {
     const config = loadCloudConfig();
     ui.projectUrl.value = config?.projectUrl || "";
     ui.publishableKey.value = "";
-    await connect(sharingMode());
+    if (sharingMode() === "cloud" && !hasStoredAuthSession()) {
+      localStorage.setItem(MODE_KEY, "local");
+      setMessage("認証セッションがないため端末内モードで開始しました。現場共有を使う場合は「現場共有を開始」を押してください。");
+      await connect("local");
+    } else {
+      await connect(sharingMode());
+    }
     if (provider && identity?.siteId) {
       await flushQueue();
       await startAutomaticPhotoSync();

@@ -52,3 +52,57 @@ python -m http.server 8000
 - Supabaseのローカル検証手順は[`docs/supabase-setup.md`](docs/supabase-setup.md)を参照してください。接続設定はgit管理外の`config/cloud.local.json`へ保存し、Publishable keyだけを使用します。
 
 JSZip 3.10.1を`vendor/jszip.min.js`へ同梱しています（MIT/GPLv3 dual license）。
+
+## 管理者端末を失った場合の復旧（現段階の制約）
+
+匿名認証を使用しているため、管理者端末のブラウザーデータを削除すると、同じ管理者UUIDへは戻れません。現在の画面には、別端末をadminへ昇格する機能がありません。通常の参加コードだけでadminになることもできません。
+
+現段階では、端末一覧の管理・端末無効化もアプリ画面にはありません。DBではadminだけが所属端末を参照でき、`set_site_member_active` RPCで無効化できますが、操作は管理者がSupabase Dashboardで対象UUIDを照合して行います。
+
+復旧が必要な場合は、Supabase管理者がDashboardで次の手順を行います。
+
+1. 復旧先端末を通常の参加コードで対象現場へ参加させ、editorになったことを確認します。
+2. `Authentication > Users`で、その端末の匿名ユーザーUUIDを作成時刻と照合して取得します。
+3. SQL Editorで対象プロジェクト名を再確認し、下記の`RECOVERY_SITE_CODE`と`RECOVERY_USER_UUID`だけを置き換えて実行します。参加コード、現場作成コード、秘密鍵はSQLへ記載しません。
+4. 実行結果で対象現場のadminが1件以上、復旧端末がactiveなadminになったことを確認します。
+
+```sql
+begin;
+
+do $admin_recovery$
+declare
+  v_site_id uuid;
+  v_user_id uuid := 'RECOVERY_USER_UUID'::uuid;
+  v_updated integer;
+begin
+  select id into strict v_site_id
+  from public.sites
+  where site_code = upper(trim('RECOVERY_SITE_CODE'));
+
+  update public.site_members
+  set role = 'admin', active = true
+  where site_id = v_site_id
+    and user_id = v_user_id
+    and active = true;
+
+  get diagnostics v_updated = row_count;
+  if v_updated <> 1 then
+    raise exception '対象現場の有効な参加端末を1件に特定できませんでした';
+  end if;
+
+  insert into public.audit_logs(site_id, actor_user_id, action, entity_type, entity_id, details)
+  values (v_site_id, null, 'admin.recovery.sql_editor', 'site_member', v_user_id,
+          jsonb_build_object('reason', 'lost anonymous admin device'));
+end
+$admin_recovery$;
+
+commit;
+
+select s.site_code, sm.user_id, sm.role, sm.device_name, sm.active
+from public.site_members sm
+join public.sites s on s.id = sm.site_id
+where s.site_code = upper(trim('RECOVERY_SITE_CODE'))
+order by sm.role, sm.device_name;
+```
+
+既存adminの無効化は、復旧後のadmin端末と対象UUIDを確認してから別操作で行います。UUID、参加コード、現場作成コードをGitHubへコミットしないでください。

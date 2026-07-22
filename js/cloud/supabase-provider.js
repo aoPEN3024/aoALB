@@ -1,6 +1,26 @@
 const SUPABASE_SDK_URL = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.106.2/+esm";
 
+let cachedProviderKey = "";
+let cachedProviderPromise = null;
+
 export async function createSupabaseProvider(config) {
+  const providerKey = `${config.projectUrl}\n${config.publishableKey}`;
+  if (cachedProviderPromise && cachedProviderKey === providerKey) return cachedProviderPromise;
+
+  cachedProviderKey = providerKey;
+  cachedProviderPromise = buildSupabaseProvider(config);
+  try {
+    return await cachedProviderPromise;
+  } catch (error) {
+    if (cachedProviderKey === providerKey) {
+      cachedProviderKey = "";
+      cachedProviderPromise = null;
+    }
+    throw error;
+  }
+}
+
+async function buildSupabaseProvider(config) {
   const { createClient } = await import(SUPABASE_SDK_URL);
   const client = createClient(config.projectUrl, config.publishableKey, {
     auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false, storageKey: "aoALB:supabase-auth" }

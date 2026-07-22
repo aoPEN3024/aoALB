@@ -117,7 +117,7 @@ async function createSlot(slot, slotIndex, photosById, loadPhotoFile, objectUrls
 function createCover(ledger, project) {
   const cover = element("section", "ledger-page ledger-cover");
   cover.dataset.pageType = "cover";
-  const firstKoushu = ledger._coverKoushu || "";
+  const firstKoushu = (ledger.coverKoushu && ledger.coverKoushu.trim()) ? ledger.coverKoushu : (ledger._coverKoushu || "");
   const fields = [
     ["title", "ledger-cover-title", ledger.title || "施工状況写真"],
     ["koushu", "ledger-cover-koushu", firstKoushu],

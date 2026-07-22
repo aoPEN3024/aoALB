@@ -12,6 +12,7 @@ export const LEDGER_SCHEMA_VERSION = 2;
 export const blankSlot = () => ({ type: "blank" });
 export const CAPTION_LIMITS = Object.freeze({ koushu: 200, sokuten: 200, text: 1000 });
 export const LEDGER_VIEW_KEY = "aoALB:ledgerViewMode";
+export const LEDGER_SELECT_KEY = "aoALB:selectedLedgerId";
 
 const clone = value => structuredClone(value);
 
@@ -64,6 +65,7 @@ export function normalizeLedger(value) {
     schemaVersion: LEDGER_SCHEMA_VERSION,
     projectId: value?.projectId || "",
     title: String(value?.title || "施工状況写真"),
+    coverKoushu: String(value?.coverKoushu || ""),
     template: PRINT_TEMPLATE,
     showCover: value?.showCover !== false,
     captionOverrides: normalizeCaptionOverrides(value?.captionOverrides),
@@ -518,6 +520,23 @@ export function initLedgerEditor() {
         event.dataTransfer.setData("application/x-aoalb-slot", String(index));
         event.dataTransfer.effectAllowed = "move";
       });
+      slot.addEventListener("dblclick", event => {
+        if (event.target.closest("button")) return;
+        const slotData = flattenSlots(currentLedger)[index];
+        if (slotData?.type === "photo") openCaptionEditor(index);
+      });
+    }
+    for (const field of ui.pages.querySelectorAll('[data-ledger-cover-field="koushu"]')) {
+      field.contentEditable = "true";
+      field.spellcheck = false;
+      field.title = "ダブルクリックで工種を編集（空にすると自動反映に戻ります）";
+      field.addEventListener("blur", () => {
+        const text = field.textContent.trim();
+        mutate(ledger => { ledger.coverKoushu = text; return ledger; });
+      });
+      field.addEventListener("keydown", event => {
+        if (event.key === "Enter") { event.preventDefault(); field.blur(); }
+      });
     }
   }
 
@@ -625,7 +644,7 @@ export function initLedgerEditor() {
     startPreviewObserver();
     projects = await getProjects();
     renderProjectOptions(preferredProjectUid);
-    await loadProject(selectedProjectUid());
+    await loadProject(selectedProjectUid(), localStorage.getItem(LEDGER_SELECT_KEY) || "");
   }
 
   function deactivate() {
@@ -643,6 +662,8 @@ export function initLedgerEditor() {
     loadProject(projectUid);
   });
   ui.select.addEventListener("change", async () => {
+    if (ui.select.value) localStorage.setItem(LEDGER_SELECT_KEY, ui.select.value);
+    else localStorage.removeItem(LEDGER_SELECT_KEY);
     currentLedger = ui.select.value ? normalizeLedger(await getLedger(ui.select.value)) : null;
     selectedPhotoId = "";
     selectedSlotIndex = -1;

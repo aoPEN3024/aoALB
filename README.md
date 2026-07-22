@@ -50,6 +50,7 @@ python -m http.server 8000
 - 写真同期の通信量制御仕様は[`docs/photo-sync-spec.md`](docs/photo-sync-spec.md)に定義しています。初期値はWi-Fi確認時のみで、回線不明時やモバイル通信では自動送信しません。写真は1枚ずつ送信し、原寸と小容量サムネイルの保存確認後に同期済みとします。
 - service role key、DBパスワード、参加コードをリポジトリへ保存しません。
 - Supabaseのローカル検証手順は[`docs/supabase-setup.md`](docs/supabase-setup.md)を参照してください。接続設定はgit管理外の`config/cloud.local.json`へ保存し、Publishable keyだけを使用します。
+- 現場作成専用コードの初回登録・変更・紛失時の手順は[`docs/site-creation-code.md`](docs/site-creation-code.md)を参照してください。平文コードはDB、Git、チャット、アプリ設定へ保存しません。
 
 JSZip 3.10.1を`vendor/jszip.min.js`へ同梱しています（MIT/GPLv3 dual license）。
 

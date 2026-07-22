@@ -189,6 +189,33 @@
           <p id="photo-sync-note" class="sharing-message" role="status" aria-live="polite"></p>
           <p class="limit-note">同期中に画面を閉じると未送信が残る場合があります。次回起動時に安全に再開します。</p>
         </section>
+        <section id="cloud-receive-panel" class="sharing-card sharing-wide" hidden>
+          <h2>クラウド写真の受信</h2>
+          <p class="limit-note">一覧では小容量サムネイルだけを遅延取得します。原寸写真は詳細表示・台帳・PDFで必要になった時だけ取得し、この端末へキャッシュします。</p>
+          <div class="photo-sync-controls cloud-receive-controls">
+            <label>原寸の自動キャッシュ
+              <select id="cloud-original-mode">
+                <option value="thumbnail_only">サムネイルのみ（推奨）</option>
+                <option value="wifi_only">Wi-Fi確認時のみ原寸を自動取得</option>
+              </select>
+            </label>
+            <button id="cloud-refresh" type="button" class="secondary">新着写真を確認</button>
+            <button id="cloud-cache-originals" type="button" class="secondary">原寸をこの端末へ保存</button>
+          </div>
+          <dl class="photo-sync-stats">
+            <div><dt>完成写真</dt><dd id="cloud-photo-count">0件</dd></div>
+            <div><dt>未取得原寸</dt><dd id="cloud-uncached-count">0件</dd></div>
+            <div><dt>未取得容量</dt><dd id="cloud-uncached-bytes">0 bytes</dd></div>
+            <div><dt>サムネイル総量</dt><dd id="cloud-thumbnail-bytes">0 bytes</dd></div>
+            <div><dt>キャッシュ容量</dt><dd id="cloud-cache-bytes">0 bytes</dd></div>
+            <div><dt>原寸キャッシュ</dt><dd id="cloud-cache-original-count">0件</dd></div>
+          </dl>
+          <div class="sharing-actions">
+            <button id="cloud-clear-cache" type="button" class="secondary">端末キャッシュを削除</button>
+          </div>
+          <p id="cloud-receive-message" class="sharing-message" role="status" aria-live="polite"></p>
+          <p class="limit-note">キャッシュ削除では、クラウド原本・写真情報・台帳配置は削除されません。必要時にオンラインで再取得できます。</p>
+        </section>
       </div>
     </section>
 

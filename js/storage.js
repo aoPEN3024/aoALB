@@ -1,5 +1,5 @@
 const DB_NAME = "aoALBDB";
-const DB_VERSION = 1;
+const DB_VERSION = 4;
 
 let dbPromise;
 
@@ -22,27 +22,37 @@ export function openDatabase() {
   if (dbPromise) return dbPromise;
   dbPromise = new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = event => {
       const db = request.result;
-      const imports = db.createObjectStore("imports", { keyPath: "internalId" });
-      imports.createIndex("exportId", "exportId", { unique: true });
-      imports.createIndex("importedAt", "importedAt");
-      imports.createIndex("projectUid", "projectUid");
-
-      const projects = db.createObjectStore("projects", { keyPath: "internalId" });
-      projects.createIndex("projectUid", "projectUid", { unique: true });
-      projects.createIndex("lastImportedAt", "lastImportedAt");
-
-      const photos = db.createObjectStore("photos", { keyPath: "internalId" });
-      photos.createIndex("photoUid", "photoUid", { unique: true });
-      photos.createIndex("projectUid", "projectUid");
-      photos.createIndex("capturedAt", "capturedAt");
-
-      const photoFiles = db.createObjectStore("photoFiles", { keyPath: "photoInternalId" });
-      photoFiles.createIndex("photoUid", "photoUid", { unique: true });
-
-      db.createObjectStore("ledgers", { keyPath: "internalId" });
-      db.createObjectStore("settings", { keyPath: "key" });
+      if (!db.objectStoreNames.contains("imports")) {
+        const imports = db.createObjectStore("imports", { keyPath: "internalId" });
+        imports.createIndex("exportId", "exportId", { unique: true });
+        imports.createIndex("importedAt", "importedAt");
+        imports.createIndex("projectUid", "projectUid");
+      }
+      if (!db.objectStoreNames.contains("projects")) {
+        const projects = db.createObjectStore("projects", { keyPath: "internalId" });
+        projects.createIndex("projectUid", "projectUid", { unique: true });
+        projects.createIndex("lastImportedAt", "lastImportedAt");
+      }
+      if (!db.objectStoreNames.contains("photos")) {
+        const photos = db.createObjectStore("photos", { keyPath: "internalId" });
+        photos.createIndex("photoUid", "photoUid", { unique: true });
+        photos.createIndex("projectUid", "projectUid");
+        photos.createIndex("capturedAt", "capturedAt");
+      }
+      if (!db.objectStoreNames.contains("photoFiles")) {
+        const photoFiles = db.createObjectStore("photoFiles", { keyPath: "photoInternalId" });
+        photoFiles.createIndex("photoUid", "photoUid", { unique: true });
+      }
+      if (!db.objectStoreNames.contains("ledgers")) db.createObjectStore("ledgers", { keyPath: "internalId" });
+      if (!db.objectStoreNames.contains("settings")) db.createObjectStore("settings", { keyPath: "key" });
+      if (!db.objectStoreNames.contains("cloudFiles")) {
+        const cloudFiles = db.createObjectStore("cloudFiles", { keyPath: "cacheKey" });
+        cloudFiles.createIndex("photoUid", "photoUid");
+        cloudFiles.createIndex("siteId", "siteId");
+        cloudFiles.createIndex("kind", "kind");
+      }
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
@@ -174,6 +184,145 @@ export async function getPhotoFile(photoInternalId) {
   const db = await openDatabase();
   const tx = db.transaction("photoFiles", "readonly");
   return requestResult(tx.objectStore("photoFiles").get(photoInternalId));
+}
+
+export async function getPhotoByInternalId(photoInternalId) {
+  const db = await openDatabase();
+  const tx = db.transaction("photos", "readonly");
+  return requestResult(tx.objectStore("photos").get(photoInternalId));
+}
+
+const cloudCacheKey = (photoUid, kind) => `${photoUid}:${kind}`;
+
+export async function getCloudFile(photoUid, kind) {
+  const db = await openDatabase();
+  const tx = db.transaction("cloudFiles", "readonly");
+  return requestResult(tx.objectStore("cloudFiles").get(cloudCacheKey(photoUid, kind)));
+}
+
+export async function saveCloudFile({ siteId, photoUid, kind, blob, sha256, bytes }) {
+  if (!(blob instanceof Blob) || !["thumbnail", "original"].includes(kind)) throw new Error("クラウド画像キャッシュが不正です。");
+  const db = await openDatabase();
+  const tx = db.transaction("cloudFiles", "readwrite");
+  const done = transactionDone(tx);
+  tx.objectStore("cloudFiles").put({
+    cacheKey: cloudCacheKey(photoUid, kind), siteId, photoUid, kind, blob,
+    sha256, bytes: Number(bytes || blob.size), cachedAt: new Date().toISOString()
+  });
+  await done;
+}
+
+export async function getCloudCacheSummary(siteId = "") {
+  const records = await getAll("cloudFiles");
+  const selected = siteId ? records.filter(item => item.siteId === siteId) : records;
+  return {
+    count: selected.length,
+    bytes: selected.reduce((sum, item) => sum + Number(item.bytes || item.blob?.size || 0), 0),
+    originals: selected.filter(item => item.kind === "original").length,
+    thumbnails: selected.filter(item => item.kind === "thumbnail").length
+  };
+}
+
+export async function clearCloudCache(siteId) {
+  const db = await openDatabase();
+  const tx = db.transaction("cloudFiles", "readwrite");
+  const done = transactionDone(tx);
+  const index = tx.objectStore("cloudFiles").index("siteId");
+  const range = IDBKeyRange.only(siteId);
+  const request = index.openKeyCursor(range);
+  request.onsuccess = () => {
+    const cursor = request.result;
+    if (!cursor) return;
+    tx.objectStore("cloudFiles").delete(cursor.primaryKey);
+    cursor.continue();
+  };
+  await done;
+}
+
+function normalizeCloudPhoto(row, project, existing, syncedAt) {
+  const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
+  const classification = metadata.classification && typeof metadata.classification === "object" ? metadata.classification : {};
+  const boardSnapshot = metadata.boardSnapshot && typeof metadata.boardSnapshot === "object" ? metadata.boardSnapshot : {};
+  const ledger = metadata.ledger && typeof metadata.ledger === "object" ? metadata.ledger : {};
+  const cloud = {
+    siteId: row.siteId, remotePhotoId: row.id, status: "complete",
+    originalPath: row.objectPath, thumbnailPath: row.thumbnailPath,
+    thumbnailSha256: row.thumbnailSha256, thumbnailBytes: Number(row.thumbnailBytes || 0),
+    thumbnailWidth: Number(row.thumbnailWidth || 0), thumbnailHeight: Number(row.thumbnailHeight || 0),
+    completedAt: row.completedAt
+  };
+  if (existing) {
+    const sources = new Set(existing.sources || [existing.source || "zip"]);
+    sources.add("cloud");
+    return { ...existing, sources: [...sources], cloud, cloudSyncedAt: syncedAt };
+  }
+  return {
+    internalId: crypto.randomUUID(), projectInternalId: project.internalId,
+    projectUid: project.projectUid, photoUid: row.photoUid, legacyId: metadata.legacyId ?? null,
+    capturedAt: row.capturedAt || null, sha256: row.sha256, mimeType: "image/jpeg",
+    width: Number(row.width), height: Number(row.height), bytes: Number(row.bytes),
+    classification: {
+      koushu: String(classification.koushu || ""), shubetsu: String(classification.shubetsu || ""),
+      saibetsu: String(classification.saibetsu || ""), sokuten: String(classification.sokuten || ""), tekiyo: String(classification.tekiyo || "")
+    },
+    boardSnapshot: {
+      koujimei: String(boardSnapshot.koujimei || ""), contractor: String(boardSnapshot.contractor || ""),
+      koushu: String(boardSnapshot.koushu || ""), shubetsu: String(boardSnapshot.shubetsu || ""),
+      saibetsu: String(boardSnapshot.saibetsu || ""), sokuten: String(boardSnapshot.sokuten || ""), tekiyo: String(boardSnapshot.tekiyo || "")
+    },
+    ledger: { title: String(ledger.title || ""), description: String(ledger.description || ""), manual: ledger.manual === true },
+    source: "cloud", sources: ["cloud"], cloud, importedAt: syncedAt, cloudSyncedAt: syncedAt
+  };
+}
+
+export async function mergeCloudSnapshot(siteId, remoteProjects, remotePhotos) {
+  const db = await openDatabase();
+  const tx = db.transaction(["projects", "photos"], "readwrite");
+  const done = transactionDone(tx);
+  const projectStore = tx.objectStore("projects");
+  const photoStore = tx.objectStore("photos");
+  const syncedAt = new Date().toISOString();
+  let added = 0;
+  let reused = 0;
+  try {
+    const projects = new Map();
+    for (const remote of remoteProjects) {
+      let project = await requestResult(projectStore.index("projectUid").get(remote.projectUid));
+      if (!project) {
+        project = {
+          internalId: crypto.randomUUID(), projectUid: remote.projectUid, koujiId: remote.koujiId ?? null,
+          name: remote.name, contractor: remote.contractor || "", source: "cloud", sources: ["cloud"],
+          siteId, createdAt: syncedAt, lastImportedAt: syncedAt, lastCloudSyncedAt: syncedAt
+        };
+        projectStore.add(project);
+      } else {
+        if (project.siteId && project.siteId !== siteId && project.sources?.includes("cloud")) {
+          throw new Error(`projectUid ${remote.projectUid} は別の現場に関連付けられています。`);
+        }
+        const sources = new Set(project.sources || [project.source || "zip"]);
+        sources.add("cloud");
+        project = { ...project, sources: [...sources], siteId, lastCloudSyncedAt: syncedAt };
+        projectStore.put(project);
+      }
+      projects.set(remote.id, project);
+    }
+    for (const remote of remotePhotos) {
+      const project = projects.get(remote.projectId);
+      if (!project) throw new Error(`クラウド写真 ${remote.photoUid} の工事情報がありません。`);
+      const existing = await requestResult(photoStore.index("photoUid").get(remote.photoUid));
+      if (existing && existing.sha256 !== remote.sha256) throw new Error(`photoUid ${remote.photoUid} のSHA-256が端末内写真と異なります。`);
+      if (existing?.cloud?.siteId && existing.cloud.siteId !== siteId) throw new Error(`photoUid ${remote.photoUid} は別の現場に関連付けられています。`);
+      const normalized = normalizeCloudPhoto({ ...remote, siteId }, project, existing, syncedAt);
+      photoStore.put(normalized);
+      existing ? reused += 1 : added += 1;
+    }
+    await done;
+    return { added, reused, projectCount: projects.size, photoCount: remotePhotos.length };
+  } catch (error) {
+    try { tx.abort(); } catch (_) { /* already completed or aborted */ }
+    await done.catch(() => {});
+    throw error;
+  }
 }
 
 function comparablePhoto(photo) {
@@ -315,5 +464,5 @@ export async function recordFailedImport({ observedExportId = null, projectName 
 export const databaseInfo = Object.freeze({
   name: DB_NAME,
   version: DB_VERSION,
-  stores: ["imports", "projects", "photos", "photoFiles", "ledgers", "settings"]
+  stores: ["imports", "projects", "photos", "photoFiles", "cloudFiles", "ledgers", "settings"]
 });

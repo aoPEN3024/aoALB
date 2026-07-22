@@ -4,6 +4,10 @@ import { detectNetworkStatus, formatTransferBytes, networkLabel, NETWORK_STATUS,
 import { classifyPhotoSyncError, createPhotoPackage } from "./cloud/photo-sync.js";
 import { createSupabaseProvider } from "./cloud/supabase-provider.js";
 import {
+  cacheAllOriginals, clearCurrentSiteCloudCache, cloudDownloadSummary,
+  configureCloudReceiver, disconnectCloudReceiver, syncCloudPhotos
+} from "./cloud/receiver.js";
+import {
   enqueuePhotosForSync, enqueueSyncEvent, getCloudIdentity, getPhotoSyncQueue, getPhotoSyncSettings,
   pendingSyncEvents, recoverInterruptedPhotoUploads, retryPhotoQueueErrors, saveCloudIdentity,
   savePhotoSyncSettings, setPhotoQueuePaused, summarizePhotoQueue, updatePhotoQueueItem, updateQueueItem
@@ -11,6 +15,7 @@ import {
 import { getPhotoByUid, getPhotoFile, getPhotosByProjectUid, getProjectByUid, getProjects } from "./storage.js";
 
 const MODE_KEY = "aoALB:sharingMode";
+const CLOUD_ORIGINAL_MODE_KEY = "aoALB:cloudOriginalMode";
 const shortId = value => value ? `${String(value).slice(0, 8)}…` : "未登録";
 const formatDate = value => value ? new Intl.DateTimeFormat("ja-JP", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "―";
 
@@ -30,7 +35,13 @@ export function initSiteSharing() {
     photoLast: byId("photo-sync-last-time"), photoProgress: byId("photo-sync-progress"),
     photoProgressText: byId("photo-sync-progress-text"), photoNow: byId("photo-sync-now"),
     photoPause: byId("photo-sync-pause"), photoResume: byId("photo-sync-resume"),
-    photoRetry: byId("photo-sync-retry"), photoNote: byId("photo-sync-note")
+    photoRetry: byId("photo-sync-retry"), photoNote: byId("photo-sync-note"),
+    receivePanel: byId("cloud-receive-panel"), receiveMode: byId("cloud-original-mode"),
+    receiveRefresh: byId("cloud-refresh"), receiveCache: byId("cloud-cache-originals"),
+    receiveClear: byId("cloud-clear-cache"), receiveMessage: byId("cloud-receive-message"),
+    receivePhotoCount: byId("cloud-photo-count"), receiveUncachedCount: byId("cloud-uncached-count"),
+    receiveUncachedBytes: byId("cloud-uncached-bytes"), receiveThumbnailBytes: byId("cloud-thumbnail-bytes"),
+    receiveCacheBytes: byId("cloud-cache-bytes"), receiveCacheOriginals: byId("cloud-cache-original-count")
   };
   let active = false;
   let provider = null;
@@ -40,6 +51,8 @@ export function initSiteSharing() {
   let testBusy = false;
   let photoBusy = false;
   let siteSwitching = false;
+  let receiveBusy = false;
+  let receiveQueued = false;
 
   function sharingMode() {
     const mode = localStorage.getItem(MODE_KEY);
@@ -54,6 +67,84 @@ export function initSiteSharing() {
   function setPhotoMessage(message, error = false) {
     ui.photoNote.textContent = message;
     ui.photoNote.classList.toggle("error", error);
+  }
+
+  function setReceiveMessage(message, error = false) {
+    ui.receiveMessage.textContent = message;
+    ui.receiveMessage.classList.toggle("error", error);
+  }
+
+  async function renderReceiveStatus() {
+    const joined = Boolean(provider && identity?.siteId && sharingMode() === "cloud");
+    ui.receivePanel.hidden = !joined;
+    if (!joined) return;
+    const summary = await cloudDownloadSummary(identity.siteId);
+    ui.receiveMode.value = localStorage.getItem(CLOUD_ORIGINAL_MODE_KEY) === "wifi_only" ? "wifi_only" : "thumbnail_only";
+    ui.receivePhotoCount.textContent = `${summary.photoCount}件`;
+    ui.receiveUncachedCount.textContent = `${summary.uncachedOriginals}件`;
+    ui.receiveUncachedBytes.textContent = formatTransferBytes(summary.uncachedOriginalBytes);
+    ui.receiveThumbnailBytes.textContent = formatTransferBytes(summary.thumbnailBytes);
+    ui.receiveCacheBytes.textContent = formatTransferBytes(summary.cache.bytes);
+    ui.receiveCacheOriginals.textContent = `${summary.cache.originals}件`;
+    ui.receiveRefresh.disabled = receiveBusy;
+    ui.receiveCache.disabled = receiveBusy || summary.uncachedOriginals === 0;
+    ui.receiveClear.disabled = receiveBusy || summary.cache.count === 0;
+  }
+
+  async function maybeAutoCacheOriginals() {
+    if (localStorage.getItem(CLOUD_ORIGINAL_MODE_KEY) !== "wifi_only") return;
+    const network = detectNetworkStatus();
+    if (network !== NETWORK_STATUS.WIFI) return;
+    await cacheOriginals(false);
+  }
+
+  async function refreshCloudPhotos({ quiet = false } = {}) {
+    if (!provider || !identity?.siteId || sharingMode() !== "cloud") return;
+    if (receiveBusy) { receiveQueued = true; return; }
+    receiveBusy = true;
+    if (!quiet) setReceiveMessage("所属現場の完成写真を確認しています。");
+    await renderReceiveStatus();
+    try {
+      const result = await syncCloudPhotos();
+      if (!result.skipped) setReceiveMessage(`完成写真${result.photoCount}件を確認しました（新規${result.added}件）。`);
+      else if (!quiet) setReceiveMessage(result.reason === "offline" ? "オフラインのため、端末内の写真とキャッシュを表示します。" : "クラウド写真の確認を開始できませんでした。", result.reason !== "offline");
+    } catch (error) {
+      setReceiveMessage(error?.message || "クラウド写真を確認できませんでした。", true);
+    } finally {
+      receiveBusy = false;
+      await renderReceiveStatus();
+    }
+    await maybeAutoCacheOriginals();
+    if (receiveQueued) {
+      receiveQueued = false;
+      await refreshCloudPhotos({ quiet: true });
+    }
+  }
+
+  async function cacheOriginals(requireConfirmation = true) {
+    if (receiveBusy) return;
+    const summary = await cloudDownloadSummary(identity?.siteId);
+    if (!summary.uncachedOriginals) return setReceiveMessage("未取得の原寸写真はありません。");
+    const network = detectNetworkStatus();
+    if (network === NETWORK_STATUS.OFFLINE) return setReceiveMessage("オフラインのため原寸写真を取得できません。", true);
+    if (requireConfirmation || [NETWORK_STATUS.MOBILE, NETWORK_STATUS.UNKNOWN].includes(network)) {
+      const label = network === NETWORK_STATUS.MOBILE ? "モバイル通信" : network === NETWORK_STATUS.UNKNOWN ? "回線種別不明" : networkLabel(network);
+      if (!window.confirm(`${summary.uncachedOriginals}枚、約${formatTransferBytes(summary.uncachedOriginalBytes)}の原寸写真を${label}で取得します。よろしいですか？\n表示量は推定で、実際の通信量は少し増える場合があります。`)) return;
+    }
+    receiveBusy = true;
+    try {
+      await cacheAllOriginals(progress => setReceiveMessage(`原寸写真を取得中 ${progress.completed}/${progress.total}件`));
+      setReceiveMessage("原寸写真をこの端末へ保存しました。クラウド原本は変更していません。");
+    } catch (error) {
+      setReceiveMessage(error?.message || "原寸写真の取得を完了できませんでした。", true);
+    } finally {
+      receiveBusy = false;
+      await renderReceiveStatus();
+    }
+    if (receiveQueued) {
+      receiveQueued = false;
+      await refreshCloudPhotos({ quiet: true });
+    }
   }
 
   function renderEvents() {
@@ -113,13 +204,14 @@ export function initSiteSharing() {
     const joined = Boolean(provider && identity?.siteId);
     ui.send.disabled = !joined || testBusy;
     ui.retry.disabled = !joined || !pending.length || testBusy;
-    await renderPhotoStatus();
+    await Promise.all([renderPhotoStatus(), renderReceiveStatus()]);
   }
 
   function receiveEvent(event) {
     if (!received.some(item => item.eventId === event.eventId)) received.push(event);
     renderEvents();
     if (active) setMessage("所属現場のメタデータ更新を受信しました。");
+    if (event.payload?.photoUid || event.eventType === "photo_synced") refreshCloudPhotos({ quiet: true });
   }
 
   function subscribeCurrentSite() {
@@ -132,9 +224,11 @@ export function initSiteSharing() {
     unsubscribe = null;
     provider?.unsubscribe?.();
     provider = null;
+    disconnectCloudReceiver();
     if (mode === "local") {
       localStorage.setItem(MODE_KEY, "local");
       setMessage("クラウドへ接続せず、従来どおり端末内データだけを使用します。");
+      disconnectCloudReceiver();
       await renderStatus();
       return;
     }
@@ -151,10 +245,16 @@ export function initSiteSharing() {
         provider = await createSupabaseProvider(config);
       }
       const auth = await provider.authenticate();
+      if (identity?.userId && identity.userId !== auth.userId) identity = null;
       identity = { ...(identity || {}), userId: auth.userId, deviceId: identity?.deviceId || auth.userId, provider: mode };
+      if (mode === "cloud" && !identity.siteId) {
+        const restored = await provider.restoreMembership();
+        if (restored) identity = { ...identity, ...restored };
+      }
       await saveCloudIdentity(identity);
       localStorage.setItem(MODE_KEY, mode);
       subscribeCurrentSite();
+      if (mode === "cloud" && identity?.siteId) configureCloudReceiver(provider, identity);
       setMessage(identity?.siteId ? `${identity.siteName || identity.siteCode}へ再接続しました。` : mode === "mock"
         ? "端末内試作を開始しました。参加コードはDEMO-ONLYです。"
         : "匿名端末認証が完了しました。現場IDと参加コードを入力してください。");
@@ -293,6 +393,7 @@ export function initSiteSharing() {
       identity = { ...identity, ...membership };
       await saveCloudIdentity(identity);
       subscribeCurrentSite();
+      if (sharingMode() === "cloud") configureCloudReceiver(provider, identity);
       setMessage(`${membership.siteName}へ${membership.role}として参加しました。`);
     } catch (error) {
       ui.joinCode.value = "";
@@ -301,6 +402,7 @@ export function initSiteSharing() {
       siteSwitching = false;
     }
     await renderStatus();
+    if (sharingMode() === "cloud") await refreshCloudPhotos();
     await startAutomaticPhotoSync();
   });
   ui.send.addEventListener("click", async () => {
@@ -330,6 +432,27 @@ export function initSiteSharing() {
   ui.photoPause.addEventListener("click", async () => { await setPhotoQueuePaused(identity.siteId, true); setPhotoMessage("未開始の写真を一時停止しました。"); await renderPhotoStatus(); });
   ui.photoResume.addEventListener("click", async () => { await setPhotoQueuePaused(identity.siteId, false); setPhotoMessage("同期キューを再開しました。"); await startAutomaticPhotoSync(); });
   ui.photoRetry.addEventListener("click", async () => { await retryPhotoQueueErrors(identity.siteId); await syncPhotos({ manual: true }); });
+  ui.receiveRefresh.addEventListener("click", () => refreshCloudPhotos());
+  ui.receiveCache.addEventListener("click", () => cacheOriginals(true));
+  ui.receiveMode.addEventListener("change", async () => {
+    localStorage.setItem(CLOUD_ORIGINAL_MODE_KEY, ui.receiveMode.value === "wifi_only" ? "wifi_only" : "thumbnail_only");
+    setReceiveMessage("この端末の原寸取得設定を保存しました。");
+    await maybeAutoCacheOriginals();
+  });
+  ui.receiveClear.addEventListener("click", async () => {
+    const summary = await cloudDownloadSummary(identity?.siteId);
+    if (!window.confirm(`この端末のクラウド写真キャッシュ約${formatTransferBytes(summary.cache.bytes)}を削除します。\nクラウド原本・写真情報・台帳配置は削除されません。`)) return;
+    receiveBusy = true;
+    try {
+      await clearCurrentSiteCloudCache();
+      setReceiveMessage("端末キャッシュを削除しました。クラウド原本は保持されています。");
+    } catch (error) {
+      setReceiveMessage(error?.message || "端末キャッシュを削除できませんでした。", true);
+    } finally {
+      receiveBusy = false;
+      await renderReceiveStatus();
+    }
+  });
   window.addEventListener("online", handleNetworkChange);
   window.addEventListener("offline", handleNetworkChange);
   const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
@@ -354,15 +477,17 @@ export function initSiteSharing() {
     if (provider && identity?.siteId) {
       await flushQueue();
       await startAutomaticPhotoSync();
+      if (sharingMode() === "cloud") {
+        configureCloudReceiver(provider, identity);
+        await refreshCloudPhotos();
+      }
     }
     await renderStatus();
   }
 
   function deactivate() {
     active = false;
-    unsubscribe?.();
-    unsubscribe = null;
   }
 
-  return { activate, deactivate };
+  return { activate, deactivate, start: activate };
 }

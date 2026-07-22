@@ -1,10 +1,11 @@
 import { validateAoalbZip, ImportValidationError } from "./importer.js";
 import {
   openDatabase, getImportByExportId, getProjects, getImports, getPhotosByProjectUid,
-  getPhotoFile, analyzeImportConflicts, estimateImportStorage, saveValidatedImport, recordFailedImport
+  analyzeImportConflicts, estimateImportStorage, saveValidatedImport, recordFailedImport
 } from "./storage.js";
 import { initLedgerEditor } from "./ledger.js";
 import { initSiteSharing } from "./sharing.js";
+import { loadPhotoAsset } from "./cloud/receiver.js";
 
 const views = ["import", "projects", "photos", "ledgers", "history", "sharing"];
 const elements = Object.fromEntries(Array.from(document.querySelectorAll("[id]"), element => [element.id, element]));
@@ -282,7 +283,7 @@ function observeThumbnails() {
       if (!entry.isIntersecting) continue;
       const image = entry.target;
       thumbnailObserver.unobserve(image);
-      getPhotoFile(image.dataset.photoInternalId).then(file => {
+      loadPhotoAsset(image.dataset.photoInternalId, "thumbnail").then(file => {
         if (!file?.blob || !image.isConnected) return;
         const url = URL.createObjectURL(file.blob);
         thumbnailUrls.add(url);
@@ -336,10 +337,13 @@ async function showPhotoDetail(photo) {
   if (detailUrl) URL.revokeObjectURL(detailUrl);
   detailUrl = null;
   elements["detail-image"].removeAttribute("src");
-  const file = await getPhotoFile(photo.internalId);
+  const file = await loadPhotoAsset(photo.internalId, "original");
   if (file?.blob) {
     detailUrl = URL.createObjectURL(file.blob);
     elements["detail-image"].src = detailUrl;
+    elements["detail-image"].alt = "工事写真";
+  } else {
+    elements["detail-image"].alt = "原寸写真はオンライン時に取得できます";
   }
   const c = photo.classification;
   const b = photo.boardSnapshot;
@@ -348,7 +352,7 @@ async function showPhotoDetail(photo) {
     detailGroup("分類情報", [["工種", c.koushu], ["種別", c.shubetsu], ["細別", c.saibetsu], ["測点", c.sokuten], ["摘要", c.tekiyo]]),
     detailGroup("撮影時の黒板", [["工事名", b.koujimei], ["施工者", b.contractor], ["工種", b.koushu], ["種別", b.shubetsu], ["細別", b.saibetsu], ["測点", b.sokuten], ["摘要", b.tekiyo]]),
     detailGroup("台帳情報", [["タイトル", photo.ledger.title], ["説明文", photo.ledger.description], ["手動編集", photo.ledger.manual ? "はい" : "いいえ"]]),
-    detailGroup("ファイル情報", [["photoUid", photo.photoUid], ["SHA-256", photo.sha256], ["画像サイズ", `${photo.width} × ${photo.height}px`], ["ファイル容量", `${photo.bytes.toLocaleString("ja-JP")} bytes`]])
+    detailGroup("ファイル情報", [["保存元", photo.sources?.includes("cloud") ? "端末／クラウド" : "端末"], ["photoUid", photo.photoUid], ["SHA-256", photo.sha256], ["画像サイズ", `${photo.width} × ${photo.height}px`], ["ファイル容量", `${photo.bytes.toLocaleString("ja-JP")} bytes`]])
   );
   elements["photo-detail"].showModal();
 }
@@ -394,11 +398,21 @@ elements["close-detail"].addEventListener("click", () => elements["photo-detail"
 elements["photo-detail"].addEventListener("close", () => { if (detailUrl) URL.revokeObjectURL(detailUrl); detailUrl = null; elements["detail-image"].removeAttribute("src"); });
 window.addEventListener("hashchange", () => showView(location.hash.slice(1)));
 window.addEventListener("beforeunload", () => { revokeThumbnailUrls(); if (detailUrl) URL.revokeObjectURL(detailUrl); });
+window.addEventListener("aoalb:cloud-photos-updated", () => {
+  renderProjects();
+  if (!elements["view-photos"].hidden) renderPhotoView();
+  if (!elements["view-ledgers"].hidden) ledgerEditor?.activate(selectedProjectUid);
+});
+window.addEventListener("aoalb:cloud-cache-cleared", () => {
+  revokeThumbnailUrls();
+  if (!elements["view-photos"].hidden) renderPhotoCards();
+});
 
 try {
   await openDatabase();
   ledgerEditor = initLedgerEditor();
   sharingController = initSiteSharing();
+  await sharingController.start();
   await Promise.all([renderProjects(), renderHistory()]);
   showView(location.hash.slice(1) || "import");
 } catch (error) {

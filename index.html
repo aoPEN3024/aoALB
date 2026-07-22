@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.106.2/+esm; style-src 'self'; img-src 'self' data: blob:; connect-src 'self' https://utvfrmgnelfvynxglvse.supabase.co wss://utvfrmgnelfvynxglvse.supabase.co; media-src 'self' blob:; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
   <meta name="theme-color" content="#1855a0">
   <title>aoALB 工事写真台帳</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231855a0'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-size='34' font-family='Arial' font-weight='700' fill='white'%3EA%3C/text%3E%3C/svg%3E">
@@ -125,9 +126,9 @@
           <form id="sharing-config-form" class="sharing-form">
             <label>Project URL<input id="sharing-project-url" type="url" autocomplete="off" placeholder="https://example.supabase.co"></label>
             <label>公開用publishable key<input id="sharing-publishable-key" type="password" autocomplete="off" placeholder="sb_publishable_..."></label>
-            <button type="submit" class="secondary">この端末へ保存</button>
+            <button type="submit" class="secondary">現場共有を開始</button>
           </form>
-          <p class="limit-note">service role key、秘密鍵、DBパスワードは絶対に入力しないでください。設定値はGitHubへ送らず、このブラウザだけに保存します。</p>
+          <p class="limit-note">公開設定にはProject URLとPublishable keyだけを使用します。service role key、秘密鍵、DBパスワードは絶対に入力しないでください。画面で上書きした設定はこのブラウザだけに保存します。</p>
         </section>
         <section class="sharing-card sharing-wide">
           <h2>現場へ参加</h2>

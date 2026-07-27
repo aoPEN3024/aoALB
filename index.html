@@ -22,7 +22,7 @@
       <button type="button" data-view="photos">写真一覧</button>
       <button type="button" data-view="ledgers">台帳編集</button>
       <button type="button" data-view="history">取込み履歴</button>
-      <button type="button" data-view="sharing">現場共有</button>
+      <button type="button" data-view="sharing">工事を共有</button>
     </nav>
   </header>
 
@@ -31,7 +31,7 @@
       <div class="page-heading">
         <p class="eyebrow">aoPIC → aoALB</p>
         <h1 id="import-title">aoALB用ZIPを読み込む</h1>
-        <p>aoPICから出力したmanifestVersion 1のZIPを、検証後にこの端末へ保存します。</p>
+        <p>aoPICから書き出したZIPを、安全性を確認してからこの端末へ保存します。</p>
       </div>
       <div class="import-layout">
         <div id="drop-zone" class="drop-zone">
@@ -46,8 +46,8 @@
         <aside class="security-note">
           <h2>取込み前に全件検証します</h2>
           <ol>
-            <li>manifestとJPEGの一対一対応</li>
-            <li>UUID、寸法、容量、SHA-256</li>
+            <li>写真情報とJPEGの一対一対応</li>
+            <li>識別情報、寸法、容量、画像内容</li>
             <li>危険なパスや不要ファイルの不在</li>
           </ol>
           <p>1件でも異常があれば、工事や写真は保存しません。</p>
@@ -101,52 +101,50 @@
 
     <section id="view-history" class="view" hidden aria-labelledby="history-title">
       <div class="page-heading"><p class="eyebrow">IMPORTS</p><h1 id="history-title">取込み履歴</h1></div>
-      <div class="table-wrap"><table><thead><tr><th>取込日時</th><th>状態</th><th>工事名</th><th>写真件数</th><th>exportId</th><th>警告・エラー</th></tr></thead><tbody id="history-body"></tbody></table></div>
+      <div class="table-wrap"><table><thead><tr><th>取込日時</th><th>状態</th><th>工事名</th><th>写真件数</th><th>取込み識別</th><th>警告・エラー</th></tr></thead><tbody id="history-body"></tbody></table></div>
       <p id="history-empty" class="empty-state" hidden>取込み履歴はありません。</p>
     </section>
 
     <section id="view-sharing" class="view" hidden aria-labelledby="sharing-title">
       <div class="page-heading">
-        <p class="eyebrow">SITE SHARING PROTOTYPE</p>
-        <h1 id="sharing-title">現場IDで共有</h1>
-        <p>現場単位の共有を安全に検証する試作画面です。未設定時は従来どおり端末内だけで動作します。</p>
+        <p class="eyebrow">SHARED PROJECTS</p>
+        <h1 id="sharing-title">工事を共有</h1>
+        <p>同じ工事に参加した端末で、写真を共有して台帳を作れます。共有しない場合も、この端末だけで従来どおり利用できます。</p>
       </div>
       <div class="sharing-grid">
-        <section class="sharing-card">
-          <h2>動作モード</h2>
-          <p id="sharing-mode-status" class="sharing-status">ローカルのみ</p>
-          <div class="sharing-actions">
-            <button id="sharing-local-mode" type="button" class="secondary">ローカルのみ</button>
-            <button id="sharing-mock-mode" type="button" class="secondary">端末内試作を開始</button>
-          </div>
-          <p class="limit-note">端末内試作は認証・RLSの代替ではありません。通信せず、別タブ相当の通知動作だけを確認します。</p>
-        </section>
-        <section class="sharing-card">
-          <h2>Supabase接続設定</h2>
-          <form id="sharing-config-form" class="sharing-form">
-            <label>Project URL<input id="sharing-project-url" type="url" autocomplete="off" placeholder="https://example.supabase.co"></label>
-            <label>公開用publishable key<input id="sharing-publishable-key" type="password" autocomplete="off" placeholder="sb_publishable_..."></label>
-            <button type="submit" class="secondary">現場共有を開始</button>
-          </form>
-          <p class="limit-note">公開設定にはProject URLとPublishable keyだけを使用します。service role key、秘密鍵、DBパスワードは絶対に入力しないでください。画面で上書きした設定はこのブラウザだけに保存します。</p>
+        <section class="sharing-card sharing-wide">
+          <h2>現在の利用方法</h2>
+          <p id="sharing-mode-status" class="sharing-status">この端末だけ</p>
+          <p class="limit-note">工事へ参加していないときも、ZIP取込み・写真確認・台帳作成は利用できます。</p>
+          <div class="sharing-actions"><button id="sharing-local-mode" type="button" class="secondary">この端末だけで使う</button></div>
+          <button id="sharing-mock-mode" type="button" class="tech-only" tabindex="-1">端末内試作</button>
         </section>
         <section class="sharing-card sharing-wide">
-          <h2>現場へ参加</h2>
+          <h2>工事の共有を始める</h2>
+          <p>公開設定が済んでいるため、工事IDと参加コードだけで始められます。</p>
+          <form id="sharing-config-form" class="sharing-form">
+            <div class="tech-only"><label>接続先<input id="sharing-project-url" type="url" autocomplete="off"></label>
+            <label>接続キー<input id="sharing-publishable-key" type="password" autocomplete="off"></label></div>
+            <button type="submit" class="secondary">工事の共有を開始</button>
+          </form>
+        </section>
+        <section class="sharing-card sharing-wide">
+          <h2>工事に参加する</h2>
           <form id="sharing-join-form" class="sharing-form sharing-join-form">
-            <label>現場ID<input id="sharing-site-code" type="text" maxlength="40" autocomplete="off" placeholder="KUKI-A-2026"></label>
+            <label>工事ID<input id="sharing-site-code" type="text" maxlength="40" autocomplete="off" placeholder="KUKI-A-2026"></label>
             <label>参加コード<input id="sharing-join-code" type="password" maxlength="72" autocomplete="one-time-code"></label>
-            <label>端末表示名<input id="sharing-device-name" type="text" maxlength="80" placeholder="事務所PC"></label>
-            <button id="sharing-join" type="submit" class="primary">端末を登録</button>
+            <details class="friendly-details"><summary>端末名を変更</summary><label>端末名<input id="sharing-device-name" type="text" maxlength="80" placeholder="事務所PC"></label></details>
+            <button id="sharing-join" type="submit" class="primary">工事に参加</button>
           </form>
           <dl class="sharing-details">
-            <div><dt>端末ID</dt><dd id="sharing-device-id">未登録</dd></div>
-            <div><dt>参加現場</dt><dd id="sharing-current-site">未参加</dd></div>
+            <div class="tech-only"><dt>端末識別</dt><dd id="sharing-device-id">未登録</dd></div>
+            <div><dt>共有中の工事</dt><dd id="sharing-current-site">未参加</dd></div>
             <div><dt>権限</dt><dd id="sharing-current-role">―</dd></div>
-            <div><dt>未送信</dt><dd id="sharing-pending-count">0件</dd></div>
+            <div><dt>送信待ち</dt><dd id="sharing-pending-count">0件</dd></div>
           </dl>
         </section>
-        <section class="sharing-card sharing-wide">
-          <h2>同期接続試験</h2>
+        <section class="sharing-card sharing-wide tech-only">
+          <h2>接続診断</h2>
           <div class="sharing-actions">
             <button id="sharing-send-test" type="button" class="primary" disabled>テスト用メタデータを送信</button>
             <button id="sharing-retry" type="button" class="secondary" disabled>未送信を再送</button>
@@ -155,68 +153,87 @@
           <ul id="sharing-events" class="sharing-events"></ul>
         </section>
         <section id="photo-sync-panel" class="sharing-card sharing-wide photo-sync-panel" hidden>
-          <h2>写真同期</h2>
+          <h2>写真を送る</h2>
           <p class="limit-note">写真は端末内に残したまま、1枚ずつ安全に送信します。表示容量はJPEG本体を基にした推定で、実際の通信量は少し増える場合があります。</p>
           <div class="photo-sync-controls">
             <label>対象工事
               <select id="photo-sync-project"></select>
             </label>
-            <button id="photo-sync-enqueue" type="button" class="secondary">未登録写真を同期対象へ追加</button>
-            <label>同期設定
+            <button id="photo-sync-enqueue" type="button" class="secondary">この端末の写真を送信待ちへ追加</button>
+            <label>写真の送信
               <select id="photo-sync-mode">
-                <option value="wifi_only">Wi-Fi確認時のみ自動同期（推奨）</option>
-                <option value="any_network">すべての回線で自動同期</option>
-                <option value="manual">手動同期のみ</option>
+                <option value="wifi_only">Wi-Fi時のみ（推奨）</option>
+                <option value="any_network">すべての回線</option>
+                <option value="manual">手動のみ</option>
               </select>
             </label>
           </div>
           <dl class="photo-sync-stats">
-            <div><dt>回線判定</dt><dd id="photo-sync-network">回線不明</dd></div>
-            <div><dt>未送信</dt><dd id="photo-sync-pending-count">0件</dd></div>
-            <div><dt>未送信容量</dt><dd id="photo-sync-pending-bytes">0 bytes</dd></div>
-            <div><dt>同期中</dt><dd id="photo-sync-uploading-count">0件</dd></div>
-            <div><dt>同期済み</dt><dd id="photo-sync-synced-count">0件</dd></div>
-            <div><dt>エラー</dt><dd id="photo-sync-error-count">0件</dd></div>
-            <div><dt>最終同期</dt><dd id="photo-sync-last-time">―</dd></div>
+            <div class="tech-only"><dt>回線</dt><dd id="photo-sync-network">確認できません</dd></div>
+            <div><dt>送信待ち</dt><dd id="photo-sync-pending-count">0件</dd></div>
+            <div><dt>送信予定容量</dt><dd id="photo-sync-pending-bytes">0 bytes</dd></div>
+            <div><dt>送信中</dt><dd id="photo-sync-uploading-count">0件</dd></div>
+            <div><dt>送信済み</dt><dd id="photo-sync-synced-count">0件</dd></div>
+            <div><dt>送信できませんでした</dt><dd id="photo-sync-error-count">0件</dd></div>
+            <div><dt>最終送信</dt><dd id="photo-sync-last-time">―</dd></div>
           </dl>
           <progress id="photo-sync-progress" max="1" value="0"></progress>
-          <p id="photo-sync-progress-text" class="limit-note">同期対象はありません。</p>
+          <p id="photo-sync-progress-text" class="limit-note">送信待ちの写真はありません。</p>
           <div class="sharing-actions">
-            <button id="photo-sync-now" type="button" class="primary">今すぐ同期</button>
-            <button id="photo-sync-pause" type="button" class="secondary">一時停止</button>
+            <button id="photo-sync-now" type="button" class="primary">今すぐ送る</button>
+            <button id="photo-sync-pause" type="button" class="secondary">停止</button>
             <button id="photo-sync-resume" type="button" class="secondary">再開</button>
-            <button id="photo-sync-retry" type="button" class="secondary">エラー写真を再送</button>
+            <button id="photo-sync-retry" type="button" class="secondary">送れなかった写真をもう一度送る</button>
           </div>
           <p id="photo-sync-note" class="sharing-message" role="status" aria-live="polite"></p>
-          <p class="limit-note">同期中に画面を閉じると未送信が残る場合があります。次回起動時に安全に再開します。</p>
+          <p class="limit-note">送信中に画面を閉じると送信待ちが残る場合があります。次回起動時に安全に再開します。</p>
         </section>
         <section id="cloud-receive-panel" class="sharing-card sharing-wide" hidden>
-          <h2>クラウド写真の受信</h2>
-          <p class="limit-note">一覧では小容量サムネイルだけを遅延取得します。原寸写真は詳細表示・台帳・PDFで必要になった時だけ取得し、この端末へキャッシュします。</p>
+          <h2>最新の写真</h2>
+          <p class="limit-note">一覧に必要な小さい画像だけを先に表示します。写真を開くときや台帳出力時に、必要な写真だけをこの端末へ保存します。</p>
           <div class="photo-sync-controls cloud-receive-controls">
-            <label>原寸の自動キャッシュ
+            <label>写真本体の保存
               <select id="cloud-original-mode">
-                <option value="thumbnail_only">サムネイルのみ（推奨）</option>
-                <option value="wifi_only">Wi-Fi確認時のみ原寸を自動取得</option>
+                <option value="thumbnail_only">一覧画像のみ（推奨）</option>
+                <option value="wifi_only">Wi-Fi時だけ写真本体を保存</option>
               </select>
             </label>
-            <button id="cloud-refresh" type="button" class="secondary">新着写真を確認</button>
-            <button id="cloud-cache-originals" type="button" class="secondary">原寸をこの端末へ保存</button>
+            <button id="cloud-refresh" type="button" class="secondary">最新にする</button>
+            <button id="cloud-cache-originals" type="button" class="secondary">写真本体をこの端末へ保存</button>
           </div>
           <dl class="photo-sync-stats">
-            <div><dt>完成写真</dt><dd id="cloud-photo-count">0件</dd></div>
-            <div><dt>未取得原寸</dt><dd id="cloud-uncached-count">0件</dd></div>
+            <div><dt>最新の写真</dt><dd id="cloud-photo-count">0件</dd></div>
+            <div><dt>未取得の写真</dt><dd id="cloud-uncached-count">0件</dd></div>
             <div><dt>未取得容量</dt><dd id="cloud-uncached-bytes">0 bytes</dd></div>
-            <div><dt>サムネイル総量</dt><dd id="cloud-thumbnail-bytes">0 bytes</dd></div>
-            <div><dt>キャッシュ容量</dt><dd id="cloud-cache-bytes">0 bytes</dd></div>
-            <div><dt>原寸キャッシュ</dt><dd id="cloud-cache-original-count">0件</dd></div>
+            <div class="tech-only"><dt>一覧画像容量</dt><dd id="cloud-thumbnail-bytes">0 bytes</dd></div>
+            <div><dt>この端末の使用容量</dt><dd id="cloud-cache-bytes">0 bytes</dd></div>
+            <div><dt>この端末へ保存済み</dt><dd id="cloud-cache-original-count">0件</dd></div>
           </dl>
           <div class="sharing-actions">
-            <button id="cloud-clear-cache" type="button" class="secondary">端末キャッシュを削除</button>
+            <button id="cloud-clear-cache" type="button" class="secondary">この端末の写真データを削除</button>
           </div>
           <p id="cloud-receive-message" class="sharing-message" role="status" aria-live="polite"></p>
-          <p class="limit-note">キャッシュ削除では、クラウド原本・写真情報・台帳配置は削除されません。必要時にオンラインで再取得できます。</p>
+          <p class="limit-note">この操作で共有先の写真、写真情報、台帳配置は削除されません。必要になれば再度この端末へ保存できます。</p>
         </section>
+        <section id="sharing-admin-panel" class="sharing-card sharing-wide" hidden>
+          <h2>共有工事の管理</h2>
+          <p class="limit-note">管理者だけが工事情報や共有状態を変更できます。</p>
+          <div class="sharing-form">
+            <label>工事名<input id="sharing-admin-name" type="text" maxlength="160"></label>
+            <label>工事ID<input id="sharing-admin-code" type="text" maxlength="40"></label>
+          </div>
+          <div class="sharing-actions"><button id="sharing-admin-save" type="button" class="secondary">工事情報を保存</button></div>
+          <details class="friendly-details"><summary>参加コードを変更</summary>
+            <p class="limit-note">旧コードは無効になります。参加済みの端末は継続利用できます。</p>
+            <label>新しい参加コード<input id="sharing-admin-join-code" type="password" minlength="8" maxlength="64"></label>
+            <label>確認入力<input id="sharing-admin-join-code-confirm" type="password" minlength="8" maxlength="64"></label>
+            <button id="sharing-admin-rotate" type="button" class="secondary">参加コードを変更</button>
+          </details>
+          <div class="sharing-actions"><button id="sharing-admin-close" type="button" class="secondary">共有を終了</button><button id="sharing-admin-reopen" type="button" class="secondary">共有を再開</button><button id="sharing-admin-trash" type="button" class="danger-outline">ごみ箱へ移動</button><button id="sharing-admin-restore" type="button" class="secondary">ごみ箱から復元</button></div>
+          <p class="limit-note">終了・ごみ箱へ移動しても写真と台帳は残ります。</p>
+          <details class="friendly-details" id="sharing-delete-empty-box"><summary>空の共有工事を完全に削除</summary><p class="limit-note">写真、台帳、送信データ、他端末の参加がすべて0件のときだけ実行できます。削除後は復元できません。</p><button id="sharing-admin-delete-empty" type="button" class="danger-outline">空工事を完全に削除</button></details>
+        </section>
+        <details class="friendly-details sharing-wide"><summary>詳細設定</summary><div class="sharing-card"><p>接続設定：設定済み</p><p class="limit-note">接続診断や開発用の確認は通常の作業では不要です。</p></div></details>
       </div>
     </section>
 

@@ -12,6 +12,11 @@
   --shadow: 0 12px 32px rgba(24, 85, 160, .10);
   font-family: "Yu Gothic UI", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
 }
+.tech-only{display:none!important}
+.friendly-details{border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:0}
+.friendly-details>summary{cursor:pointer;padding:12px 14px;font-weight:700;color:var(--blue)}
+.friendly-details[open]>summary{border-bottom:1px solid var(--line)}
+.friendly-details>label,.friendly-details>p,.friendly-details>button,.friendly-details>.sharing-card{margin:10px 14px}
 * { box-sizing: border-box; }
 body { margin: 0; color: var(--ink); background: var(--canvas); min-height: 100vh; }
 button, input, select { font: inherit; }

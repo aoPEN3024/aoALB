@@ -38,13 +38,14 @@ async function buildSupabaseProvider(config) {
     },
     async restoreMembership() {
       const { data, error } = await client.from("site_members")
-        .select("site_id,role,device_name,sites!inner(site_code,name)")
+        .select("site_id,role,device_name,sites!inner(site_code,name,status,revision)")
         .eq("active", true).order("last_seen_at", { ascending: false }).limit(2);
       if (error) throw error;
       if (!Array.isArray(data) || data.length !== 1) return null;
       const row = data[0];
       return {
         siteId: row.site_id, siteCode: row.sites?.site_code, siteName: row.sites?.name,
+        siteStatus: row.sites?.status || "active", siteRevision: Number(row.sites?.revision || 1),
         role: row.role, deviceName: row.device_name || "名称未設定端末"
       };
     },
@@ -59,6 +60,22 @@ async function buildSupabaseProvider(config) {
         throw new Error("現場IDまたは参加コードが正しくありません。");
       }
       return { siteId: row.site_id, siteCode: row.site_code, siteName: row.site_name, role: row.member_role, deviceName };
+    },
+    async refreshSite(siteId) {
+      const { data, error } = await client.from("sites")
+        .select("id,site_code,name,status,revision").eq("id", siteId).single();
+      if (error) throw error;
+      return {
+        siteId: data.id, siteCode: data.site_code, siteName: data.name,
+        siteStatus: data.status || "active", siteRevision: Number(data.revision || 1)
+      };
+    },
+    async siteRpc(name, values) {
+      const allowed = new Set(["update_site", "rotate_site_join_code", "close_site", "reopen_site", "trash_site", "restore_site", "delete_empty_site"]);
+      if (!allowed.has(name)) throw new Error("この管理操作は利用できません。");
+      const { data, error } = await client.rpc(name, values);
+      if (error) throw error;
+      return Array.isArray(data) ? data[0] : data;
     },
     async pushTestMetadata(event) {
       const { error } = await client.from("sync_events").insert({
@@ -102,13 +119,13 @@ async function buildSupabaseProvider(config) {
         .select("id,project_id,photo_uid,sha256,bytes,width,height").eq("site_id", siteId).eq("photo_uid", photo.photoUid).maybeSingle();
       if (photoReadError) throw photoReadError;
       if (photoRow && (photoRow.project_id !== projectRow.id || photoRow.sha256 !== photo.sha256 || Number(photoRow.bytes) !== Number(photo.bytes))) {
-        throw new Error("クラウド上の同じphotoUidが異なるJPEGを参照しています。");
+        throw new Error("共有先に同じ識別情報の異なる写真があります。管理者へ確認してください。");
       }
       if (!photoRow) {
         const sameHash = await client.from("photos")
           .select("id,photo_uid").eq("site_id", siteId).eq("sha256", photo.sha256).maybeSingle();
         if (sameHash.error) throw sameHash.error;
-        if (sameHash.data) throw new Error("同じSHA-256のJPEGが別のphotoUidで登録されています。");
+        if (sameHash.data) throw new Error("同じ写真が別の識別情報で登録されています。管理者へ確認してください。");
         const { data, error } = await client.from("photos").insert({
           site_id: siteId, project_id: projectRow.id, photo_uid: photo.photoUid, captured_at: photo.capturedAt,
           sha256: photo.sha256, mime_type: photo.mimeType, width: photo.width, height: photo.height,
@@ -123,11 +140,11 @@ async function buildSupabaseProvider(config) {
             const sameHashAfterConflict = await client.from("photos")
               .select("id,photo_uid").eq("site_id", siteId).eq("sha256", photo.sha256).maybeSingle();
             if (sameHashAfterConflict.error) throw sameHashAfterConflict.error;
-            if (sameHashAfterConflict.data) throw new Error("同じSHA-256のJPEGが別のphotoUidで登録されています。");
+            if (sameHashAfterConflict.data) throw new Error("同じ写真が別の識別情報で登録されています。管理者へ確認してください。");
             throw error;
           }
           if (photoRow.project_id !== projectRow.id || photoRow.sha256 !== photo.sha256 || Number(photoRow.bytes) !== Number(photo.bytes)) {
-            throw new Error("クラウド上の同じphotoUidが異なるJPEGを参照しています。");
+            throw new Error("共有先に同じ識別情報の異なる写真があります。管理者へ確認してください。");
           }
         } else {
           if (error) throw error;
@@ -173,7 +190,7 @@ async function buildSupabaseProvider(config) {
       if (stored.status !== "complete" || stored.object_path !== originalPath || stored.sha256 !== photo.sha256 || Number(stored.bytes) !== Number(photo.bytes)
         || stored.thumbnail_object_path !== thumbnailPath || stored.thumbnail_sha256 !== thumbnail.sha256
         || Number(stored.thumbnail_bytes) !== Number(thumbnail.bytes) || !stored.upload_completed_at) {
-        throw new Error("Supabase側の写真保存確認に失敗しました。");
+        throw new Error("共有先へ保存した写真を確認できませんでした。");
       }
 
       await recordSyncEvent(photoRow, completedAt);
@@ -217,11 +234,11 @@ async function buildSupabaseProvider(config) {
     },
     async downloadPhotoObject(path) {
       if (typeof path !== "string" || !/^[0-9a-f-]{36}\/(photos|thumbnails)\/[0-9a-f-]{36}\.jpg$/.test(path)) {
-        throw new Error("クラウド写真の保存先が不正です。");
+        throw new Error("共有写真の保存先が正しくありません。");
       }
       const { data, error } = await client.storage.from("site-photos").download(path);
       if (error) throw error;
-      if (!(data instanceof Blob)) throw new Error("クラウド写真を取得できませんでした。");
+      if (!(data instanceof Blob)) throw new Error("共有写真を取得できませんでした。");
       return data;
     },
     subscribe(siteId, callback) {

@@ -96,6 +96,14 @@ td { overflow-wrap: anywhere; }
 .sharing-wide { grid-column: 1 / -1; }
 .sharing-status { display: inline-block; margin: 0 0 16px; padding: 6px 10px; border-radius: 999px; color: var(--blue); background: var(--blue-soft); font-weight: 800; }
 .sharing-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.sharing-site-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.sharing-site-tabs button.active { color: #fff; background: var(--blue); border-color: var(--blue); }
+.sharing-site-list, .sharing-member-list { display: grid; gap: 12px; }
+.sharing-site-item, .sharing-member-item { border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: #fff; }
+.sharing-site-item.selected { border-color: var(--blue); box-shadow: 0 0 0 2px rgb(24 85 160 / 12%); }
+.sharing-site-item h3, .sharing-site-item p { margin: 0 0 9px; }
+.sharing-member-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+@media (max-width: 520px) { .sharing-member-item { align-items: stretch; flex-direction: column; } }
 .sharing-form { display: grid; gap: 12px; }
 .sharing-form label { display: grid; gap: 5px; color: var(--muted); font-size: .82rem; font-weight: 700; }
 .sharing-form input { width: 100%; min-width: 0; padding: 10px 11px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); background: #fff; }

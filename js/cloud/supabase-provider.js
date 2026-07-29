@@ -37,17 +37,26 @@ async function buildSupabaseProvider(config) {
       return { userId: data.user.id, anonymous: true };
     },
     async restoreMembership() {
-      const { data, error } = await client.from("site_members")
-        .select("site_id,role,device_name,sites!inner(site_code,name,status,revision)")
-        .eq("active", true).order("last_seen_at", { ascending: false }).limit(2);
+      const { data, error } = await client.rpc("list_my_sites");
       if (error) throw error;
       if (!Array.isArray(data) || data.length !== 1) return null;
       const row = data[0];
       return {
-        siteId: row.site_id, siteCode: row.sites?.site_code, siteName: row.sites?.name,
-        siteStatus: row.sites?.status || "active", siteRevision: Number(row.sites?.revision || 1),
-        role: row.role, deviceName: row.device_name || "名称未設定端末"
+        siteId: row.site_id, siteCode: row.site_code, siteName: row.site_name,
+        siteStatus: row.site_status || "active", siteRevision: Number(row.site_revision || 1),
+        role: row.member_role, deviceName: row.device_name || "名称未設定端末",
+        adminCodeConfigured: row.admin_code_configured === true
       };
+    },
+    async listMySites() {
+      const { data, error } = await client.rpc("list_my_sites");
+      if (error) throw error;
+      return (data || []).map(row => ({
+        siteId: row.site_id, siteCode: row.site_code, siteName: row.site_name,
+        siteStatus: row.site_status || "active", siteRevision: Number(row.site_revision || 1),
+        role: row.member_role, deviceName: row.device_name || "名称未設定端末",
+        updatedAt: row.site_updated_at, adminCodeConfigured: row.admin_code_configured === true
+      }));
     },
     async joinSite({ siteCode, joinCode, deviceName }) {
       const { data, error } = await client.rpc("join_site", { p_site_code: siteCode, p_join_code: joinCode, p_device_name: deviceName });
@@ -61,6 +70,25 @@ async function buildSupabaseProvider(config) {
       }
       return { siteId: row.site_id, siteCode: row.site_code, siteName: row.site_name, role: row.member_role, deviceName };
     },
+    async claimSiteAdmin({ siteCode, adminCode, deviceName }) {
+      const { data, error } = await client.rpc("claim_site_admin", {
+        p_site_code: siteCode, p_site_admin_code: adminCode, p_device_name: deviceName
+      });
+      if (error) throw error;
+      const row = Array.isArray(data) ? data[0] : data;
+      if (!row?.site_id) {
+        if (row?.error_code === "temporarily_blocked") {
+          throw new Error("確認回数が上限に達しました。15分ほど待って再度お試しください。");
+        }
+        throw new Error("現場管理コードが違うか、現在利用できません。");
+      }
+      return {
+        siteId: row.site_id, siteCode: row.site_code, siteName: row.site_name,
+        role: row.member_role, siteStatus: row.site_status || "active",
+        siteRevision: Number(row.site_revision || 1),
+        adminCodeConfigured: row.admin_code_configured === true, deviceName
+      };
+    },
     async refreshSite(siteId) {
       const { data, error } = await client.from("sites")
         .select("id,site_code,name,status,revision").eq("id", siteId).single();
@@ -71,10 +99,16 @@ async function buildSupabaseProvider(config) {
       };
     },
     async siteRpc(name, values) {
-      const allowed = new Set(["update_site", "rotate_site_join_code", "close_site", "reopen_site", "trash_site", "restore_site", "delete_empty_site"]);
+      const allowed = new Set([
+        "update_site", "rotate_site_join_code", "close_site", "reopen_site",
+        "trash_site", "restore_site", "delete_empty_site",
+        "set_initial_site_admin_code", "rotate_site_admin_code",
+        "list_site_members_admin", "set_site_member_active_v2"
+      ]);
       if (!allowed.has(name)) throw new Error("この管理操作は利用できません。");
       const { data, error } = await client.rpc(name, values);
       if (error) throw error;
+      if (name === "list_site_members_admin") return data || [];
       return Array.isArray(data) ? data[0] : data;
     },
     async pushTestMetadata(event) {

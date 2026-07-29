@@ -7,7 +7,7 @@
   <meta name="theme-color" content="#1855a0">
   <title>aoALB 工事写真台帳</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231855a0'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-size='34' font-family='Arial' font-weight='700' fill='white'%3EA%3C/text%3E%3C/svg%3E">
-  <link rel="stylesheet" href="css/app.css">
+  <link rel="stylesheet" href="css/app.css?v=20260729-admin-recovery1">
   <link rel="stylesheet" href="css/print.css" media="print">
 </head>
 <body>
@@ -143,6 +143,32 @@
             <div><dt>送信待ち</dt><dd id="sharing-pending-count">0件</dd></div>
           </dl>
         </section>
+        <section class="sharing-card sharing-wide">
+          <h2>管理者として入る</h2>
+          <p class="limit-note">工事ごとの現場管理コードを使います。一般社員用の参加コードや、会社共通の現場作成コードとは異なります。</p>
+          <form id="sharing-admin-claim-form" class="sharing-form sharing-join-form">
+            <label>工事ID<input id="sharing-admin-claim-site-code" type="text" maxlength="40" autocomplete="off" placeholder="KUKI-A-2026"></label>
+            <label>現場管理コード<input id="sharing-admin-claim-code" type="password" minlength="8" maxlength="64" autocomplete="one-time-code"></label>
+            <label>この端末の名前<input id="sharing-admin-claim-device" type="text" maxlength="80" placeholder="事務所PC"></label>
+            <button type="submit" class="primary">管理者として入る</button>
+          </form>
+        </section>
+        <section id="sharing-site-list-panel" class="sharing-card sharing-wide" hidden>
+          <h2>参加している工事</h2>
+          <div class="sharing-site-tabs" role="tablist" aria-label="工事の状態">
+            <button type="button" data-site-status="active" class="active">利用中</button>
+            <button type="button" data-site-status="closed">終了済み</button>
+            <button type="button" data-site-status="trashed">ごみ箱</button>
+          </div>
+          <div id="sharing-site-list" class="sharing-site-list"></div>
+          <p id="sharing-site-list-empty" class="limit-note" hidden>該当する工事はありません。</p>
+        </section>
+        <section id="sharing-non-admin-note" class="sharing-card sharing-wide" hidden>
+          <h2>工事の管理</h2>
+          <p>工事名の変更、終了、ごみ箱、削除は管理者のみ操作できます。</p>
+          <button id="sharing-open-admin-claim" type="button" class="secondary">管理者として入る</button>
+          <p id="sharing-admin-code-unavailable" class="limit-note" hidden>この工事では、別端末から管理者になるための設定がまだ完了していません。</p>
+        </section>
         <section class="sharing-card sharing-wide tech-only">
           <h2>接続診断</h2>
           <div class="sharing-actions">
@@ -229,9 +255,20 @@
             <label>確認入力<input id="sharing-admin-join-code-confirm" type="password" minlength="8" maxlength="64"></label>
             <button id="sharing-admin-rotate" type="button" class="secondary">参加コードを変更</button>
           </details>
-          <div class="sharing-actions"><button id="sharing-admin-close" type="button" class="secondary">共有を終了</button><button id="sharing-admin-reopen" type="button" class="secondary">共有を再開</button><button id="sharing-admin-trash" type="button" class="danger-outline">ごみ箱へ移動</button><button id="sharing-admin-restore" type="button" class="secondary">ごみ箱から復元</button></div>
-          <p class="limit-note">終了・ごみ箱へ移動しても写真と台帳は残ります。</p>
-          <details class="friendly-details" id="sharing-delete-empty-box"><summary>空の共有工事を完全に削除</summary><p class="limit-note">写真、台帳、送信データ、他端末の参加がすべて0件のときだけ実行できます。削除後は復元できません。</p><button id="sharing-admin-delete-empty" type="button" class="danger-outline">空工事を完全に削除</button></details>
+          <details class="friendly-details" open>
+            <summary>現場管理コード</summary>
+            <p id="sharing-admin-code-status" class="limit-note"></p>
+            <label>新しい現場管理コード<input id="sharing-admin-access-code" type="password" minlength="8" maxlength="64" autocomplete="new-password"></label>
+            <label>確認入力<input id="sharing-admin-access-confirm" type="password" minlength="8" maxlength="64" autocomplete="new-password"></label>
+            <button id="sharing-admin-access-save" type="button" class="secondary">現場管理コードを設定</button>
+          </details>
+          <details class="friendly-details" open>
+            <summary>管理者の端末</summary>
+            <div id="sharing-member-list" class="sharing-member-list"></div>
+          </details>
+          <div class="sharing-actions"><button id="sharing-admin-close" type="button" class="secondary">工事を終了</button><button id="sharing-admin-reopen" type="button" class="secondary">工事を再開</button><button id="sharing-admin-trash" type="button" class="danger-outline">工事をごみ箱へ移動</button><button id="sharing-admin-restore" type="button" class="secondary">工事を復元</button></div>
+          <p class="limit-note">工事を終了しても、写真・台帳・参加者は削除されません。</p>
+          <details class="friendly-details" id="sharing-delete-empty-box"><summary>この工事を完全に削除</summary><p class="limit-note">写真、台帳、送信データ、他の有効な参加端末がすべて0件のときだけ実行できます。削除後は復元できません。</p><button id="sharing-admin-delete-empty" type="button" class="danger-outline">この工事を完全に削除</button></details>
         </section>
         <details class="friendly-details sharing-wide"><summary>詳細設定</summary><div class="sharing-card"><p>接続設定：設定済み</p><p class="limit-note">接続診断や開発用の確認は通常の作業では不要です。</p></div></details>
       </div>
@@ -332,6 +369,6 @@
   </dialog>
 
   <script src="vendor/jszip.min.js"></script>
-  <script type="module" src="js/app.js"></script>
+  <script type="module" src="js/app.js?v=20260729-admin-recovery1"></script>
 </body>
 </html>

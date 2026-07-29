@@ -2,7 +2,7 @@ import { loadCloudConfig, loadLocalCloudConfig, saveCloudConfig } from "./cloud/
 import { MockSiteProvider } from "./cloud/mock-provider.js";
 import { detectNetworkStatus, formatTransferBytes, networkLabel, NETWORK_STATUS, shouldAutoSync } from "./cloud/network.js";
 import { classifyPhotoSyncError, createPhotoPackage } from "./cloud/photo-sync.js";
-import { createSupabaseProvider } from "./cloud/supabase-provider.js";
+import { createSupabaseProvider } from "./cloud/supabase-provider.js?v=20260729-admin-recovery1";
 import {
   cacheAllOriginals, clearCurrentSiteCloudCache, cloudDownloadSummary,
   configureCloudReceiver, disconnectCloudReceiver, syncCloudPhotos
@@ -20,6 +20,20 @@ const CLOUD_ORIGINAL_MODE_KEY = "aoALB:cloudOriginalMode";
 const shortId = value => value ? `${String(value).slice(0, 8)}…` : "未登録";
 const formatDate = value => value ? new Intl.DateTimeFormat("ja-JP", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "―";
 const roleLabel = value => ({ admin: "管理者", editor: "メンバー", viewer: "閲覧のみ" })[value] || "―";
+function validateAdminCode(value, confirmation) {
+  const code = String(value || "");
+  if (code !== String(confirmation || "")) throw new Error("現場管理コードと確認入力が一致しません。");
+  const categories = [
+    /[a-z]/.test(code), /[A-Z]/.test(code), /[0-9]/.test(code), /[^A-Za-z0-9]/.test(code)
+  ].filter(Boolean).length;
+  if (code.length < 8 || code.length > 64 || new TextEncoder().encode(code).length > 72
+      || /[\s\u0000-\u001f\u007f]/.test(code) || categories < 2
+      || /^(password|admin|administrator|qwerty|letmein|aopen|aoalb|aopic|12345678|87654321)$/i.test(code)
+      || /^(.)\1{7,}$/.test(code)) {
+    throw new Error("現場管理コードは空白を含まない8～64文字で、英字・数字・記号のうち2種類以上を使用してください。");
+  }
+  return code;
+}
 
 export function initSiteSharing() {
   const byId = id => document.getElementById(id);
@@ -27,6 +41,11 @@ export function initSiteSharing() {
     mode: byId("sharing-mode-status"), local: byId("sharing-local-mode"), mock: byId("sharing-mock-mode"),
     configForm: byId("sharing-config-form"), projectUrl: byId("sharing-project-url"), publishableKey: byId("sharing-publishable-key"),
     joinForm: byId("sharing-join-form"), siteCode: byId("sharing-site-code"), joinCode: byId("sharing-join-code"),
+    adminClaimForm: byId("sharing-admin-claim-form"), adminClaimSiteCode: byId("sharing-admin-claim-site-code"),
+    adminClaimCode: byId("sharing-admin-claim-code"), adminClaimDevice: byId("sharing-admin-claim-device"),
+    sitesPanel: byId("sharing-site-list-panel"), sites: byId("sharing-site-list"),
+    sitesEmpty: byId("sharing-site-list-empty"), nonAdminNote: byId("sharing-non-admin-note"),
+    openAdminClaim: byId("sharing-open-admin-claim"), adminCodeUnavailable: byId("sharing-admin-code-unavailable"),
     deviceName: byId("sharing-device-name"), deviceId: byId("sharing-device-id"), currentSite: byId("sharing-current-site"),
     currentRole: byId("sharing-current-role"), pending: byId("sharing-pending-count"), send: byId("sharing-send-test"),
     retry: byId("sharing-retry"), message: byId("sharing-message"), events: byId("sharing-events"),
@@ -50,7 +69,9 @@ export function initSiteSharing() {
     adminRotate: byId("sharing-admin-rotate"), adminClose: byId("sharing-admin-close"),
     adminReopen: byId("sharing-admin-reopen"), adminTrash: byId("sharing-admin-trash"),
     adminRestore: byId("sharing-admin-restore"), adminDeleteEmpty: byId("sharing-admin-delete-empty"),
-    deleteEmptyBox: byId("sharing-delete-empty-box")
+    deleteEmptyBox: byId("sharing-delete-empty-box"), adminAccessCode: byId("sharing-admin-access-code"),
+    adminAccessConfirm: byId("sharing-admin-access-confirm"), adminAccessSave: byId("sharing-admin-access-save"),
+    adminAccessStatus: byId("sharing-admin-code-status"), memberList: byId("sharing-member-list")
   };
   let active = false;
   let provider = null;
@@ -62,6 +83,8 @@ export function initSiteSharing() {
   let siteSwitching = false;
   let receiveBusy = false;
   let receiveQueued = false;
+  let memberships = [];
+  let siteStatusFilter = "active";
 
   function sharingMode() {
     const mode = localStorage.getItem(MODE_KEY);
@@ -226,6 +249,11 @@ export function initSiteSharing() {
     ui.retry.disabled = !joined || !pending.length || testBusy;
     const admin = joined && identity?.role === "admin";
     ui.adminPanel.hidden = !admin;
+    ui.nonAdminNote.hidden = !joined || admin;
+    ui.adminCodeUnavailable.hidden = !joined || Boolean(identity?.adminCodeConfigured);
+    ui.openAdminClaim.hidden = !identity?.adminCodeConfigured;
+    ui.sitesPanel.hidden = !provider || memberships.length === 0;
+    renderSiteList();
     if (admin) {
       if (document.activeElement !== ui.adminName) ui.adminName.value = identity.siteName || "";
       if (document.activeElement !== ui.adminCode) ui.adminCode.value = identity.siteCode || "";
@@ -234,8 +262,123 @@ export function initSiteSharing() {
       ui.adminTrash.hidden = identity.siteStatus === "trashed";
       ui.adminRestore.hidden = identity.siteStatus !== "trashed";
       ui.deleteEmptyBox.hidden = identity.siteStatus !== "trashed";
+      ui.adminAccessStatus.textContent = identity.adminCodeConfigured
+        ? "別端末から管理者として入れる設定済みです。変更すると旧コードは直ちに使えなくなります。"
+        : "別端末から管理するため、現場管理コードを設定してください。";
+      ui.adminAccessSave.textContent = identity.adminCodeConfigured
+        ? "現場管理コードを変更" : "現場管理コードを設定";
+      await renderMemberList();
     }
     await Promise.all([renderPhotoStatus(), renderReceiveStatus()]);
+  }
+
+  function statusLabel(value) {
+    return ({ active: "利用中", closed: "終了済み", trashed: "ごみ箱" })[value] || value;
+  }
+
+  function renderSiteList() {
+    if (!ui.sites) return;
+    const rows = memberships.filter(item => item.siteStatus === siteStatusFilter);
+    ui.sites.replaceChildren(...rows.map(item => {
+      const card = document.createElement("article");
+      card.className = "sharing-site-item";
+      if (item.siteId === identity?.siteId) card.classList.add("selected");
+      const title = document.createElement("h3");
+      title.textContent = item.siteName;
+      const meta = document.createElement("p");
+      meta.textContent = `${item.siteCode} / ${roleLabel(item.role)} / ${statusLabel(item.siteStatus)} / 最終更新 ${formatDate(item.updatedAt)}`;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "secondary";
+      button.textContent = item.siteId === identity?.siteId ? "この工事を表示中" : "この工事を開く";
+      button.disabled = item.siteId === identity?.siteId;
+      button.addEventListener("click", () => switchSite(item));
+      card.append(title, meta, button);
+      return card;
+    }));
+    ui.sitesEmpty.hidden = rows.length > 0;
+    document.querySelectorAll("[data-site-status]").forEach(button => {
+      button.classList.toggle("active", button.dataset.siteStatus === siteStatusFilter);
+    });
+  }
+
+  async function refreshMemberships() {
+    memberships = provider?.listMySites ? await provider.listMySites() : [];
+    if (identity?.siteId) {
+      const current = memberships.find(item => item.siteId === identity.siteId);
+      if (current) identity = { ...identity, ...current };
+    }
+  }
+
+  async function switchSite(item) {
+    if (siteSwitching || !item?.siteId) return;
+    siteSwitching = true;
+    try {
+      unsubscribe?.();
+      disconnectCloudReceiver();
+      identity = { ...identity, ...item };
+      await saveCloudIdentity(identity);
+      subscribeCurrentSite();
+      if (sharingMode() === "cloud") configureCloudReceiver(provider, identity);
+      setMessage(`${item.siteName}を開きました。`);
+      await renderStatus();
+      if (sharingMode() === "cloud") await refreshCloudPhotos();
+    } catch (error) {
+      setMessage(error?.message || "工事を切り替えられませんでした。", true);
+    } finally {
+      siteSwitching = false;
+    }
+  }
+
+  async function renderMemberList() {
+    if (!provider?.siteRpc || identity?.role !== "admin") return;
+    try {
+      const rows = await provider.siteRpc("list_site_members_admin", { p_site_id: identity.siteId });
+      const members = Array.isArray(rows) ? rows : rows ? [rows] : [];
+      ui.memberList.replaceChildren(...members.map(member => {
+        const row = document.createElement("div");
+        row.className = "sharing-member-item";
+        const text = document.createElement("span");
+        text.textContent = `${member.device_name} / ${roleLabel(member.member_role)} / ${formatDate(member.last_seen_at)} / ${member.active ? "有効" : "停止中"}${member.is_current_device ? "（この端末）" : ""}`;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "secondary";
+        button.textContent = member.active ? "停止" : "再開";
+        button.addEventListener("click", () => toggleMember(member));
+        row.append(text, button);
+        return row;
+      }));
+    } catch (error) {
+      ui.memberList.replaceChildren();
+      const note = document.createElement("p");
+      note.className = "limit-note";
+      note.textContent = "端末一覧を確認できませんでした。";
+      ui.memberList.append(note);
+    }
+  }
+
+  async function toggleMember(member) {
+    const nextActive = !member.active;
+    if (member.is_current_device && !nextActive
+        && !window.confirm("この端末を停止すると、この工事を操作できなくなります。別の有効な管理者端末があることを確認しましたか？")) return;
+    if (!member.is_current_device
+        && !window.confirm(`${member.device_name}を${nextActive ? "再開" : "停止"}しますか？`)) return;
+    await runAdminAction(nextActive ? "端末を再開" : "端末を停止", async () => {
+      await provider.siteRpc("set_site_member_active_v2", {
+        p_site_id: identity.siteId, p_member_id: member.member_id,
+        p_active: nextActive, p_expected_revision: identity.siteRevision
+      });
+      if (member.is_current_device && !nextActive) {
+        unsubscribe?.();
+        unsubscribe = null;
+        disconnectCloudReceiver();
+        identity = { userId: identity.userId, deviceId: identity.deviceId, provider: identity.provider };
+        await refreshMemberships();
+        await saveCloudIdentity(identity);
+        return { skipRefresh: true };
+      }
+      return null;
+    });
   }
 
   function receiveEvent(event) {
@@ -278,9 +421,14 @@ export function initSiteSharing() {
       const auth = await provider.authenticate();
       if (identity?.userId && identity.userId !== auth.userId) identity = null;
       identity = { ...(identity || {}), userId: auth.userId, deviceId: identity?.deviceId || auth.userId, provider: mode };
-      if (mode === "cloud" && !identity.siteId) {
-        const restored = await provider.restoreMembership();
-        if (restored) identity = { ...identity, ...restored };
+      if (mode === "cloud") {
+        await refreshMemberships();
+        const selected = memberships.find(item => item.siteId === identity.siteId);
+        if (selected) identity = { ...identity, ...selected };
+        else if (memberships.length === 1) identity = { ...identity, ...memberships[0] };
+        else if (identity.siteId) {
+          identity = { userId: identity.userId, deviceId: identity.deviceId, provider: mode };
+        }
       }
       await saveCloudIdentity(identity);
       localStorage.setItem(MODE_KEY, mode);
@@ -407,7 +555,10 @@ export function initSiteSharing() {
     try {
       setMessage(`${label}しています…`);
       const result = await action();
-      if (!result?.skipRefresh) await refreshIdentitySite();
+      if (!result?.skipRefresh) {
+        await refreshIdentitySite();
+        await refreshMemberships();
+      }
       setMessage(`${label}しました。`);
     } catch (error) {
       setMessage(/revision_conflict/i.test(error?.message || "")
@@ -452,6 +603,7 @@ export function initSiteSharing() {
         identity = { ...identity, ...(await provider.refreshSite(identity.siteId)) };
         await saveCloudIdentity(identity);
       }
+      await refreshMemberships();
       subscribeCurrentSite();
       if (sharingMode() === "cloud") configureCloudReceiver(provider, identity);
       setMessage(`${membership.siteName}へ参加しました（${roleLabel(membership.role)}）。`);
@@ -465,6 +617,40 @@ export function initSiteSharing() {
     if (sharingMode() === "cloud") await refreshCloudPhotos();
     await startAutomaticPhotoSync();
   });
+  ui.adminClaimForm.addEventListener("submit", async event => {
+    event.preventDefault();
+    if (!provider?.claimSiteAdmin) return setMessage("先に工事の共有を開始してください。", true);
+    if (siteSwitching) return;
+    siteSwitching = true;
+    try {
+      const membership = await provider.claimSiteAdmin({
+        siteCode: ui.adminClaimSiteCode.value,
+        adminCode: ui.adminClaimCode.value,
+        deviceName: ui.adminClaimDevice.value.trim() || "名称未設定端末"
+      });
+      identity = { ...identity, ...membership };
+      await refreshMemberships();
+      await saveCloudIdentity(identity);
+      subscribeCurrentSite();
+      if (sharingMode() === "cloud") configureCloudReceiver(provider, identity);
+      setMessage("管理者として接続しました。");
+    } catch (error) {
+      setMessage(error?.message || "現場管理コードが違うか、現在利用できません。", true);
+    } finally {
+      ui.adminClaimCode.value = "";
+      siteSwitching = false;
+      await renderStatus();
+    }
+  });
+  ui.openAdminClaim.addEventListener("click", () => {
+    ui.adminClaimSiteCode.value = identity?.siteCode || "";
+    ui.adminClaimDevice.value = identity?.deviceName || "";
+    ui.adminClaimCode.focus();
+  });
+  document.querySelectorAll("[data-site-status]").forEach(button => button.addEventListener("click", () => {
+    siteStatusFilter = button.dataset.siteStatus;
+    renderSiteList();
+  }));
   ui.send.addEventListener("click", async () => {
     const event = {
       eventId: crypto.randomUUID(), siteId: identity.siteId, entityId: crypto.randomUUID(), deviceName: identity.deviceName || "名称未設定端末",
@@ -504,33 +690,53 @@ export function initSiteSharing() {
     ui.adminJoinCode.value = "";
     ui.adminJoinConfirm.value = "";
   }));
+  ui.adminAccessSave.addEventListener("click", () => runAdminAction(
+    identity?.adminCodeConfigured ? "現場管理コードを変更" : "現場管理コードを設定",
+    async () => {
+      try {
+        const code = validateAdminCode(ui.adminAccessCode.value, ui.adminAccessConfirm.value);
+        const name = identity.adminCodeConfigured
+          ? "rotate_site_admin_code" : "set_initial_site_admin_code";
+        await provider.siteRpc(name, {
+          p_site_id: identity.siteId,
+          p_expected_revision: identity.siteRevision,
+          p_new_code: code
+        });
+        identity.adminCodeConfigured = true;
+      } finally {
+        ui.adminAccessCode.value = "";
+        ui.adminAccessConfirm.value = "";
+      }
+    }
+  ));
   ui.adminClose.addEventListener("click", async () => {
     const queue = summarizePhotoQueue(await getPhotoSyncQueue(), identity.siteId);
-    if (!window.confirm(`共有を終了すると新しい参加と写真送信が止まります。既存写真と台帳は残ります。${queue.pending + queue.paused + queue.error ? `\n送信待ちの写真が${queue.pending + queue.paused + queue.error}件あります。` : ""}\nよろしいですか？`)) return;
-    runAdminAction("共有を終了", () => provider.siteRpc("close_site", {
+    if (!window.confirm(`工事を終了すると新しい参加と写真送信が止まります。写真・台帳・参加者は削除されません。${queue.pending + queue.paused + queue.error ? `\n送信待ちの写真が${queue.pending + queue.paused + queue.error}件あります。` : ""}\nよろしいですか？`)) return;
+    runAdminAction("工事を終了", () => provider.siteRpc("close_site", {
       p_site_id: identity.siteId, p_expected_revision: identity.siteRevision
     }));
   });
-  ui.adminReopen.addEventListener("click", () => runAdminAction("共有を再開", () => provider.siteRpc("reopen_site", {
+  ui.adminReopen.addEventListener("click", () => runAdminAction("工事を再開", () => provider.siteRpc("reopen_site", {
     p_site_id: identity.siteId, p_expected_revision: identity.siteRevision
   })));
   ui.adminTrash.addEventListener("click", () => {
     if (window.prompt("写真は削除されません。確認のため工事名を入力してください。") !== identity.siteName) return;
-    runAdminAction("ごみ箱へ移動", () => provider.siteRpc("trash_site", {
+    runAdminAction("工事をごみ箱へ移動", () => provider.siteRpc("trash_site", {
       p_site_id: identity.siteId, p_expected_revision: identity.siteRevision
     }));
   });
-  ui.adminRestore.addEventListener("click", () => runAdminAction("ごみ箱から復元", () => provider.siteRpc("restore_site", {
+  ui.adminRestore.addEventListener("click", () => runAdminAction("工事を復元", () => provider.siteRpc("restore_site", {
     p_site_id: identity.siteId, p_expected_revision: identity.siteRevision
   })));
   ui.adminDeleteEmpty.addEventListener("click", () => {
     const confirmed = window.prompt("空工事であることを共有先で再確認します。完全削除する工事名を入力してください。");
     if (confirmed !== identity.siteName) return;
-    runAdminAction("空工事を完全に削除", async () => {
+    runAdminAction("この工事を完全に削除", async () => {
       await provider.siteRpc("delete_empty_site", {
         p_site_id: identity.siteId, p_expected_revision: identity.siteRevision, p_confirm_name: confirmed
       });
       identity = { userId: identity.userId, deviceId: identity.deviceId, provider: identity.provider };
+      await refreshMemberships();
       await saveCloudIdentity(identity);
       return { skipRefresh: true };
     });
@@ -564,6 +770,10 @@ export function initSiteSharing() {
   async function activate() {
     active = true;
     identity = await getCloudIdentity();
+    const defaultDeviceName = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)
+      ? "このスマートフォン" : "この端末";
+    if (!ui.deviceName.value) ui.deviceName.value = defaultDeviceName;
+    if (!ui.adminClaimDevice.value) ui.adminClaimDevice.value = identity?.deviceName || defaultDeviceName;
     await recoverInterruptedPhotoUploads();
     try {
       await loadLocalCloudConfig();

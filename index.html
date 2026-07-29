@@ -7,7 +7,7 @@
   <meta name="theme-color" content="#1855a0">
   <title>aoALB 工事写真台帳</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231855a0'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-size='34' font-family='Arial' font-weight='700' fill='white'%3EA%3C/text%3E%3C/svg%3E">
-  <link rel="stylesheet" href="css/app.css?v=20260729-admin-recovery1">
+  <link rel="stylesheet" href="css/app.css?v=20260729-local-delete1">
   <link rel="stylesheet" href="css/print.css" media="print">
 </head>
 <body>
@@ -41,7 +41,7 @@
           <p>ここへドロップするか、ボタンから選択してください。</p>
           <button id="choose-zip" type="button" class="primary">ファイルを選ぶ</button>
           <p class="limit-note">最大250MB・写真1,000枚・JPEG1枚20MB</p>
-          <p class="limit-note">現在のバージョンでは、取り込んだ工事・写真をアプリ内から削除できません。削除機能は今後追加予定です。</p>
+          <p class="limit-note">取り込んだ工事は、工事一覧からこの端末のデータだけを個別に削除できます。</p>
         </div>
         <aside class="security-note">
           <h2>取込み前に全件検証します</h2>
@@ -75,6 +75,7 @@
 
     <section id="view-projects" class="view" hidden aria-labelledby="projects-title">
       <div class="page-heading"><p class="eyebrow">PROJECTS</p><h1 id="projects-title">工事一覧</h1></div>
+      <p id="project-message" class="project-message" role="status" aria-live="polite"></p>
       <div id="project-list" class="project-grid"></div>
       <p id="project-empty" class="empty-state" hidden>取り込まれた工事はありません。</p>
     </section>
@@ -334,6 +335,40 @@
     </div>
   </dialog>
 
+  <dialog id="project-delete-dialog" class="project-delete-dialog">
+    <form id="project-delete-form">
+      <div class="dialog-header">
+        <h2>この端末から工事データを削除</h2>
+        <button id="project-delete-close" type="button" aria-label="閉じる">×</button>
+      </div>
+      <div class="project-delete-body">
+        <p class="danger-notice">この操作では、この端末に保存されている写真・台帳・取込み情報を削除します。</p>
+        <p>共有先や別の端末のデータ、aoPICのデータは削除されません。</p>
+        <dl class="project-delete-summary">
+          <div><dt>工事名</dt><dd id="project-delete-name"></dd></div>
+          <div><dt>写真</dt><dd id="project-delete-photo-count"></dd></div>
+          <div><dt>台帳</dt><dd id="project-delete-ledger-count"></dd></div>
+          <div><dt>取込み履歴</dt><dd id="project-delete-import-count"></dd></div>
+          <div><dt>使用容量</dt><dd id="project-delete-bytes"></dd></div>
+          <div><dt>取込日時</dt><dd id="project-delete-imported-at"></dd></div>
+        </dl>
+        <section class="project-delete-columns">
+          <div><h3>削除される内容</h3><ul><li>この工事の写真と端末保存画像</li><li>この工事の台帳・配置・文言編集</li><li>この工事だけの取込み履歴</li></ul></div>
+          <div><h3>削除されない内容</h3><ul><li>共有先・別端末のデータ</li><li>別の工事とその写真・台帳</li><li>接続設定とログイン状態</li></ul></div>
+        </section>
+        <label class="project-delete-confirm">確認のため、上記の工事名を完全一致で入力してください
+          <input id="project-delete-confirm-name" type="text" maxlength="2000" autocomplete="off">
+        </label>
+        <p id="project-delete-error" class="project-delete-error" role="alert" hidden></p>
+        <p id="project-delete-progress" class="project-delete-progress" hidden>削除処理中です。画面を閉じないでください。</p>
+      </div>
+      <div class="project-delete-footer">
+        <button id="project-delete-cancel" type="button" class="secondary">キャンセル</button>
+        <button id="project-delete-submit" type="submit" class="danger-button" disabled>この端末から完全に削除</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="caption-editor" class="caption-editor">
     <form id="caption-editor-form" method="dialog">
       <div class="dialog-header"><h2>台帳文言を編集</h2><button id="caption-editor-close" type="button" aria-label="閉じる">×</button></div>
@@ -369,6 +404,6 @@
   </dialog>
 
   <script src="vendor/jszip.min.js"></script>
-  <script type="module" src="js/app.js?v=20260729-admin-recovery1"></script>
+  <script type="module" src="js/app.js?v=20260729-local-delete1"></script>
 </body>
 </html>

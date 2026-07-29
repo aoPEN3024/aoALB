@@ -4,7 +4,7 @@ import {
   analyzeImportConflicts, estimateImportStorage, saveValidatedImport, recordFailedImport
 } from "./storage.js";
 import { initLedgerEditor } from "./ledger.js";
-import { initSiteSharing } from "./sharing.js";
+import { initSiteSharing } from "./sharing.js?v=20260729-admin-recovery1";
 import { loadPhotoAsset } from "./cloud/receiver.js";
 
 const views = ["import", "projects", "photos", "ledgers", "history", "sharing"];

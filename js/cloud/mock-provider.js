@@ -14,6 +14,7 @@ export class MockSiteProvider {
   constructor(deviceId) {
     this.deviceId = deviceId;
     this.channel = null;
+    this.sites = [];
   }
 
   async authenticate() {
@@ -24,7 +25,49 @@ export class MockSiteProvider {
     const normalized = String(siteCode || "").trim().toUpperCase();
     if (!/^[A-Z0-9][A-Z0-9_-]{2,39}$/.test(normalized)) throw new Error("現場IDは英数字、ハイフン、アンダースコアで入力してください。");
     if (joinCode !== "DEMO-ONLY") throw new Error("端末内試作の参加コードはDEMO-ONLYです。");
-    return { siteId: siteIdFor(normalized), siteCode: normalized, siteName: `${normalized}（端末内試作）`, role: "editor", deviceName };
+    const membership = {
+      siteId: siteIdFor(normalized), siteCode: normalized, siteName: `${normalized}（端末内試作）`,
+      role: "editor", deviceName, siteStatus: "active", siteRevision: 1,
+      updatedAt: new Date().toISOString(), adminCodeConfigured: true
+    };
+    this.sites = [...this.sites.filter(item => item.siteId !== membership.siteId), membership];
+    return membership;
+  }
+
+  async listMySites() {
+    return this.sites.map(item => ({ ...item }));
+  }
+
+  async claimSiteAdmin({ siteCode, adminCode, deviceName }) {
+    const normalized = String(siteCode || "").trim().toUpperCase();
+    if (adminCode !== "DEMO-ADMIN-1") throw new Error("現場管理コードが違うか、現在利用できません。");
+    const membership = {
+      siteId: siteIdFor(normalized), siteCode: normalized,
+      siteName: `${normalized}（端末内試作）`, role: "admin",
+      siteStatus: "active", siteRevision: 1, updatedAt: new Date().toISOString(),
+      adminCodeConfigured: true, deviceName
+    };
+    this.sites = [...this.sites.filter(item => item.siteId !== membership.siteId), membership];
+    return membership;
+  }
+
+  async siteRpc(name, values = {}) {
+    if (name === "list_site_members_admin") {
+      return [{
+        member_id: this.deviceId, device_name: "この端末", member_role: "admin",
+        last_seen_at: new Date().toISOString(), active: true, is_current_device: true
+      }];
+    }
+    const site = this.sites.find(item => item.siteId === values.p_site_id);
+    if (site) {
+      if (name === "close_site") site.siteStatus = "closed";
+      if (name === "reopen_site") site.siteStatus = "active";
+      if (name === "trash_site") site.siteStatus = "trashed";
+      if (name === "restore_site") site.siteStatus = "active";
+      site.siteRevision += 1;
+      site.updatedAt = new Date().toISOString();
+    }
+    return { site_revision: site?.siteRevision || 1, admin_code_configured: true };
   }
 
   async pushTestMetadata(event) {

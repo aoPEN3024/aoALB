@@ -23,8 +23,8 @@ export class MockSiteProvider {
 
   async joinSite({ siteCode, joinCode, deviceName }) {
     const normalized = String(siteCode || "").trim().toUpperCase();
-    if (!/^[A-Z0-9][A-Z0-9_-]{2,39}$/.test(normalized)) throw new Error("現場IDは英数字、ハイフン、アンダースコアで入力してください。");
-    if (joinCode !== "DEMO-ONLY") throw new Error("端末内試作の参加コードはDEMO-ONLYです。");
+    if (!/^[A-Z0-9][A-Z0-9_-]{2,39}$/.test(normalized)) throw new Error("工事IDは英数字、ハイフン、アンダースコアで入力してください。");
+    if (joinCode !== "DEMO-ONLY") throw new Error("端末内試作の工事PASSはDEMO-ONLYです。");
     const membership = {
       siteId: siteIdFor(normalized), siteCode: normalized, siteName: `${normalized}（端末内試作）`,
       role: "editor", deviceName, siteStatus: "active", siteRevision: 1,
@@ -40,7 +40,7 @@ export class MockSiteProvider {
 
   async claimSiteAdmin({ siteCode, adminCode, deviceName }) {
     const normalized = String(siteCode || "").trim().toUpperCase();
-    if (adminCode !== "DEMO-ADMIN-1") throw new Error("現場管理コードが違うか、現在利用できません。");
+    if (adminCode !== "DEMO-ADMIN-1") throw new Error("管理者PASSが違うか、現在利用できません。");
     const membership = {
       siteId: siteIdFor(normalized), siteCode: normalized,
       siteName: `${normalized}（端末内試作）`, role: "admin",

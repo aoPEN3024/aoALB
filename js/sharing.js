@@ -22,7 +22,7 @@ const formatDate = value => value ? new Intl.DateTimeFormat("ja-JP", { dateStyle
 const roleLabel = value => ({ admin: "管理者", editor: "メンバー", viewer: "閲覧のみ" })[value] || "―";
 function validateAdminCode(value, confirmation) {
   const code = String(value || "");
-  if (code !== String(confirmation || "")) throw new Error("現場管理コードと確認入力が一致しません。");
+  if (code !== String(confirmation || "")) throw new Error("管理者PASSと確認入力が一致しません。");
   const categories = [
     /[a-z]/.test(code), /[A-Z]/.test(code), /[0-9]/.test(code), /[^A-Za-z0-9]/.test(code)
   ].filter(Boolean).length;
@@ -30,7 +30,7 @@ function validateAdminCode(value, confirmation) {
       || /[\s\u0000-\u001f\u007f]/.test(code) || categories < 2
       || /^(password|admin|administrator|qwerty|letmein|aopen|aoalb|aopic|12345678|87654321)$/i.test(code)
       || /^(.)\1{7,}$/.test(code)) {
-    throw new Error("現場管理コードは空白を含まない8～64文字で、英字・数字・記号のうち2種類以上を使用してください。");
+    throw new Error("管理者PASSは空白を含まない8～64文字で、英字・数字・記号のうち2種類以上を使用してください。");
   }
   return code;
 }
@@ -264,9 +264,9 @@ export function initSiteSharing() {
       ui.deleteEmptyBox.hidden = identity.siteStatus !== "trashed";
       ui.adminAccessStatus.textContent = identity.adminCodeConfigured
         ? "別端末から管理者として入れる設定済みです。変更すると旧コードは直ちに使えなくなります。"
-        : "別端末から管理するため、現場管理コードを設定してください。";
+        : "別端末から管理するため、管理者PASSを設定してください。";
       ui.adminAccessSave.textContent = identity.adminCodeConfigured
-        ? "現場管理コードを変更" : "現場管理コードを設定";
+        ? "管理者PASSを変更" : "管理者PASSを設定";
       await renderMemberList();
     }
     await Promise.all([renderPhotoStatus(), renderReceiveStatus()]);
@@ -435,8 +435,8 @@ export function initSiteSharing() {
       subscribeCurrentSite();
       if (mode === "cloud" && identity?.siteId) configureCloudReceiver(provider, identity);
       setMessage(identity?.siteId ? `${identity.siteName || identity.siteCode}へ再接続しました。` : mode === "mock"
-        ? "端末内試作を開始しました。参加コードはDEMO-ONLYです。"
-        : "共有の準備ができました。工事IDと参加コードを入力してください。");
+        ? "端末内試作を開始しました。工事PASSはDEMO-ONLYです。"
+        : "共有の準備ができました。工事IDと工事PASSを入力してください。");
     } catch (error) {
       localStorage.setItem(MODE_KEY, "local");
       setMessage(error?.message || "共有接続を開始できませんでした。", true);
@@ -635,7 +635,7 @@ export function initSiteSharing() {
       if (sharingMode() === "cloud") configureCloudReceiver(provider, identity);
       setMessage("管理者として接続しました。");
     } catch (error) {
-      setMessage(error?.message || "現場管理コードが違うか、現在利用できません。", true);
+      setMessage(error?.message || "管理者PASSが違うか、現在利用できません。", true);
     } finally {
       ui.adminClaimCode.value = "";
       siteSwitching = false;
@@ -682,8 +682,8 @@ export function initSiteSharing() {
     p_site_id: identity.siteId, p_expected_revision: identity.siteRevision,
     p_name: ui.adminName.value, p_site_code: ui.adminCode.value
   })));
-  ui.adminRotate.addEventListener("click", () => runAdminAction("参加コードを変更", async () => {
-    if (!ui.adminJoinCode.value || ui.adminJoinCode.value !== ui.adminJoinConfirm.value) throw new Error("参加コードと確認入力が一致しません。");
+  ui.adminRotate.addEventListener("click", () => runAdminAction("工事PASSを変更", async () => {
+    if (!ui.adminJoinCode.value || ui.adminJoinCode.value !== ui.adminJoinConfirm.value) throw new Error("工事PASSと確認入力が一致しません。");
     await provider.siteRpc("rotate_site_join_code", {
       p_site_id: identity.siteId, p_new_code: ui.adminJoinCode.value, p_grant_role: "editor"
     });
@@ -691,7 +691,7 @@ export function initSiteSharing() {
     ui.adminJoinConfirm.value = "";
   }));
   ui.adminAccessSave.addEventListener("click", () => runAdminAction(
-    identity?.adminCodeConfigured ? "現場管理コードを変更" : "現場管理コードを設定",
+    identity?.adminCodeConfigured ? "管理者PASSを変更" : "管理者PASSを設定",
     async () => {
       try {
         const code = validateAdminCode(ui.adminAccessCode.value, ui.adminAccessConfirm.value);

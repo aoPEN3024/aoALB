@@ -7,7 +7,7 @@
   <meta name="theme-color" content="#1855a0">
   <title>aoALB 工事写真台帳</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231855a0'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-size='34' font-family='Arial' font-weight='700' fill='white'%3EA%3C/text%3E%3C/svg%3E">
-  <link rel="stylesheet" href="css/app.css?v=20260729-local-delete1">
+  <link rel="stylesheet" href="css/app.css?v=20260730-local-delete-pass-labels1">
   <link rel="stylesheet" href="css/print.css" media="print">
 </head>
 <body>
@@ -122,7 +122,7 @@
         </section>
         <section class="sharing-card sharing-wide">
           <h2>工事の共有を始める</h2>
-          <p>公開設定が済んでいるため、工事IDと参加コードだけで始められます。</p>
+          <p>公開設定が済んでいるため、工事IDと工事PASSだけで始められます。</p>
           <form id="sharing-config-form" class="sharing-form">
             <div class="tech-only"><label>接続先<input id="sharing-project-url" type="url" autocomplete="off"></label>
             <label>接続キー<input id="sharing-publishable-key" type="password" autocomplete="off"></label></div>
@@ -133,7 +133,7 @@
           <h2>工事に参加する</h2>
           <form id="sharing-join-form" class="sharing-form sharing-join-form">
             <label>工事ID<input id="sharing-site-code" type="text" maxlength="40" autocomplete="off" placeholder="KUKI-A-2026"></label>
-            <label>参加コード<input id="sharing-join-code" type="password" maxlength="72" autocomplete="one-time-code"></label>
+            <label>工事PASS<input id="sharing-join-code" type="password" maxlength="72" autocomplete="one-time-code"></label>
             <details class="friendly-details"><summary>端末名を変更</summary><label>端末名<input id="sharing-device-name" type="text" maxlength="80" placeholder="事務所PC"></label></details>
             <button id="sharing-join" type="submit" class="primary">工事に参加</button>
           </form>
@@ -146,10 +146,10 @@
         </section>
         <section class="sharing-card sharing-wide">
           <h2>管理者として入る</h2>
-          <p class="limit-note">工事ごとの現場管理コードを使います。一般社員用の参加コードや、会社共通の現場作成コードとは異なります。</p>
+          <p class="limit-note">工事ごとの管理者PASSを使います。一般社員用の工事PASSや、会社共通の会社PASSとは異なります。</p>
           <form id="sharing-admin-claim-form" class="sharing-form sharing-join-form">
             <label>工事ID<input id="sharing-admin-claim-site-code" type="text" maxlength="40" autocomplete="off" placeholder="KUKI-A-2026"></label>
-            <label>現場管理コード<input id="sharing-admin-claim-code" type="password" minlength="8" maxlength="64" autocomplete="one-time-code"></label>
+            <label>管理者PASS<input id="sharing-admin-claim-code" type="password" minlength="8" maxlength="64" autocomplete="one-time-code"></label>
             <label>この端末の名前<input id="sharing-admin-claim-device" type="text" maxlength="80" placeholder="事務所PC"></label>
             <button type="submit" class="primary">管理者として入る</button>
           </form>
@@ -250,18 +250,18 @@
             <label>工事ID<input id="sharing-admin-code" type="text" maxlength="40"></label>
           </div>
           <div class="sharing-actions"><button id="sharing-admin-save" type="button" class="secondary">工事情報を保存</button></div>
-          <details class="friendly-details"><summary>参加コードを変更</summary>
+          <details class="friendly-details"><summary>工事PASSを変更</summary>
             <p class="limit-note">旧コードは無効になります。参加済みの端末は継続利用できます。</p>
-            <label>新しい参加コード<input id="sharing-admin-join-code" type="password" minlength="8" maxlength="64"></label>
+            <label>新しい工事PASS<input id="sharing-admin-join-code" type="password" minlength="8" maxlength="64"></label>
             <label>確認入力<input id="sharing-admin-join-code-confirm" type="password" minlength="8" maxlength="64"></label>
-            <button id="sharing-admin-rotate" type="button" class="secondary">参加コードを変更</button>
+            <button id="sharing-admin-rotate" type="button" class="secondary">工事PASSを変更</button>
           </details>
           <details class="friendly-details" open>
-            <summary>現場管理コード</summary>
+            <summary>管理者PASS</summary>
             <p id="sharing-admin-code-status" class="limit-note"></p>
-            <label>新しい現場管理コード<input id="sharing-admin-access-code" type="password" minlength="8" maxlength="64" autocomplete="new-password"></label>
+            <label>新しい管理者PASS<input id="sharing-admin-access-code" type="password" minlength="8" maxlength="64" autocomplete="new-password"></label>
             <label>確認入力<input id="sharing-admin-access-confirm" type="password" minlength="8" maxlength="64" autocomplete="new-password"></label>
-            <button id="sharing-admin-access-save" type="button" class="secondary">現場管理コードを設定</button>
+            <button id="sharing-admin-access-save" type="button" class="secondary">管理者PASSを設定</button>
           </details>
           <details class="friendly-details" open>
             <summary>管理者の端末</summary>
@@ -404,6 +404,6 @@
   </dialog>
 
   <script src="vendor/jszip.min.js"></script>
-  <script type="module" src="js/app.js?v=20260729-local-delete1"></script>
+  <script type="module" src="js/app.js?v=20260730-local-delete-pass-labels1"></script>
 </body>
 </html>

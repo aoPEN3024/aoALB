@@ -49,11 +49,13 @@ main { width: min(1320px, calc(100% - 32px)); margin: 0 auto; padding: 40px 0 72
 .security-note h2 { margin-top: 0; font-size: 1.12rem; }
 .security-note li { margin: 12px 0; }
 .security-note p { color: var(--muted); }
-.primary, .secondary, .danger-outline { border-radius: 10px; padding: 10px 16px; font-weight: 750; }
+.primary, .secondary, .danger-outline, .danger-button { border-radius: 10px; padding: 10px 16px; font-weight: 750; }
 .primary { border: 1px solid var(--blue); color: #fff; background: var(--blue); }
 .primary:hover { background: var(--blue-dark); }
 .secondary { border: 1px solid var(--line); color: var(--ink); background: #fff; }
 .danger-outline { border: 1px solid var(--red); color: var(--red); background: #fff; }
+.danger-button { border: 1px solid #a81216; color: #fff; background: #b7191d; }
+.danger-button:disabled { opacity: .48; cursor: not-allowed; }
 .status-panel, .result-panel { margin-top: 22px; padding: 22px; }
 .status-row { display: flex; justify-content: space-between; gap: 20px; }
 progress { width: 100%; height: 12px; margin: 14px 0 4px; accent-color: var(--blue); }
@@ -68,7 +70,18 @@ progress { width: 100%; height: 12px; margin: 14px 0 4px; accent-color: var(--bl
 .project-card:hover { border-color: #9ab4d4; transform: translateY(-2px); }
 .project-card h2 { margin: 0 0 8px; font-size: 1.08rem; }
 .project-card p { margin: 5px 0; color: var(--muted); }
-.project-meta { display: flex; justify-content: space-between; gap: 12px; padding-top: 14px; margin-top: 14px; border-top: 1px solid var(--line); font-size: .88rem; }
+.project-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.project-card-header h2 { min-width: 0; overflow-wrap: anywhere; }
+.project-kind { flex: 0 0 auto; border-radius: 999px; padding: 4px 9px; font-size: .72rem; font-weight: 800; }
+.project-kind.local { color: #174d86; background: #e6f1fc; }
+.project-kind.shared { color: #4b5668; background: #edf0f4; }
+.project-card-actions { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin-top: 16px; }
+.project-card-actions .project-card-note { flex: 1 1 100%; margin: 0; font-size: .8rem; }
+.project-message { min-height: 1.5em; margin: 0 0 14px; font-weight: 700; }
+.project-message:empty { display: none; }
+.project-message.success { color: #176a40; }
+.project-message.error { color: #a81216; }
+.project-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; padding-top: 14px; margin-top: 14px; border-top: 1px solid var(--line); font-size: .88rem; }
 .filter-panel { display: grid; grid-template-columns: repeat(4, minmax(130px, 1fr)); gap: 12px; padding: 18px; margin-bottom: 14px; }
 .filter-panel label { display: grid; gap: 5px; color: var(--muted); font-size: .8rem; font-weight: 700; }
 .filter-panel select, .filter-panel input[type=search] { min-width: 0; padding: 9px 10px; border: 1px solid var(--line); border-radius: 9px; background: white; color: var(--ink); }
@@ -128,6 +141,24 @@ dialog::backdrop { background: rgba(12,24,42,.62); }
 .dialog-header { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; background: white; border-bottom: 1px solid var(--line); }
 .dialog-header h2 { margin: 0; }
 .dialog-header button { border: 0; background: transparent; font-size: 1.8rem; color: var(--muted); }
+.project-delete-dialog { width: min(760px,calc(100% - 20px)); }
+.project-delete-dialog form { display: flex; flex-direction: column; max-height: calc(100dvh - 32px); }
+.project-delete-body { overflow-y: auto; padding: 20px; }
+.project-delete-body > p { margin: 0 0 12px; }
+.danger-notice { border-left: 5px solid var(--red); padding: 10px 12px; background: #fff1f1; color: #871014; font-weight: 800; }
+.project-delete-summary { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 1px; margin: 18px 0; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--line); }
+.project-delete-summary div { min-width: 0; padding: 10px 12px; background: #fff; }
+.project-delete-summary dt { color: var(--muted); font-size: .76rem; font-weight: 700; }
+.project-delete-summary dd { margin: 3px 0 0; overflow-wrap: anywhere; font-weight: 800; }
+.project-delete-columns { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin: 16px 0; }
+.project-delete-columns > div { border: 1px solid var(--line); border-radius: 12px; padding: 12px; background: #f8fafc; }
+.project-delete-columns h3 { margin: 0 0 7px; font-size: .9rem; }
+.project-delete-columns ul { margin: 0; padding-left: 20px; font-size: .84rem; }
+.project-delete-confirm { display: grid; gap: 7px; margin-top: 18px; font-weight: 800; }
+.project-delete-confirm input { width: 100%; min-width: 0; border: 1px solid #9eabc0; border-radius: 9px; padding: 11px; }
+.project-delete-error { color: #a81216; font-weight: 800; }
+.project-delete-progress { color: var(--blue); font-weight: 800; }
+.project-delete-footer { display: flex; justify-content: flex-end; gap: 9px; padding: 14px 20px calc(14px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: #fff; }
 .detail-layout { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(320px, .85fr); }
 .detail-image-wrap { display: grid; place-items: center; min-height: 420px; padding: 18px; background: #111927; }
 .detail-image-wrap img { max-width: 100%; max-height: 70vh; object-fit: contain; }
@@ -254,6 +285,11 @@ dialog::backdrop { background: rgba(12,24,42,.62); }
   .ledger-pages[data-layout="spread"] { grid-template-columns: var(--ledger-frame-width); }
 }
 @media (max-width: 720px), (max-height: 500px) and (max-width: 950px) and (pointer: coarse) {
+  .project-grid { grid-template-columns: minmax(0,1fr); }
+  .project-card { padding: 16px; }
+  .project-delete-summary,.project-delete-columns { grid-template-columns: 1fr; }
+  .project-delete-footer { flex-wrap: wrap; }
+  .project-delete-footer button { flex: 1 1 100%; }
   .ledger-heading { display: block; }
   .ledger-setup { grid-template-columns: 1fr; }
   .ledger-title-label { grid-column: auto; }

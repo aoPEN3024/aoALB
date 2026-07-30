@@ -1,7 +1,8 @@
 import { validateAoalbZip, ImportValidationError } from "./importer.js";
 import {
   openDatabase, getImportByExportId, getProjects, getImports, getPhotosByProjectUid,
-  analyzeImportConflicts, estimateImportStorage, saveValidatedImport, recordFailedImport
+  analyzeImportConflicts, estimateImportStorage, saveValidatedImport, recordFailedImport,
+  getLocalProjectDeletionPreview, deleteLocalImportedProject
 } from "./storage.js";
 import { initLedgerEditor } from "./ledger.js";
 import { initSiteSharing } from "./sharing.js?v=20260729-admin-recovery1";
@@ -19,6 +20,8 @@ let thumbnailObserver = null;
 const thumbnailUrls = new Set();
 let ledgerEditor = null;
 let sharingController = null;
+let projectDeletionPreview = null;
+let deletingProject = false;
 
 class StorageCapacityError extends Error {
   constructor(requiredBytes, availableBytes) {
@@ -189,24 +192,147 @@ async function handleZip(file) {
 async function renderProjects() {
   const projects = (await getProjects()).sort((a, b) => (b.lastImportedAt || "").localeCompare(a.lastImportedAt || ""));
   const cards = await Promise.all(projects.map(async project => {
-    const count = (await getPhotosByProjectUid(project.projectUid)).length;
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "project-card";
-    button.append(textElement("h2", project.name), textElement("p", `施工者: ${project.contractor || "―"}`));
+    const preview = await getLocalProjectDeletionPreview(project.internalId);
+    const card = document.createElement("article");
+    card.className = "project-card";
+    const header = document.createElement("div");
+    header.className = "project-card-header";
+    const isShared = preview.dataKind === "shared";
+    header.append(
+      textElement("h2", project.name),
+      textElement("span", isShared ? "共有工事" : "ZIP取込み", `project-kind ${isShared ? "shared" : "local"}`)
+    );
+    card.append(header, textElement("p", `施工者: ${project.contractor || "―"}`));
     const meta = document.createElement("div");
     meta.className = "project-meta";
-    meta.append(textElement("span", `写真 ${count}件`), textElement("span", `最終取込 ${formatDate(project.lastImportedAt)}`));
-    button.append(meta, textElement("p", `ID ${shortId(project.projectUid)}`));
-    button.addEventListener("click", () => {
+    meta.append(
+      textElement("span", `写真 ${preview.photoCount}件`),
+      textElement("span", `台帳 ${preview.ledgerCount}件`),
+      textElement("span", `使用容量 約${formatBytes(preview.estimatedBytes)}`),
+      textElement("span", `取込日時 ${formatDate(preview.importedAt)}`)
+    );
+    card.append(meta);
+
+    const actions = document.createElement("div");
+    actions.className = "project-card-actions";
+    const openButton = document.createElement("button");
+    openButton.type = "button";
+    openButton.className = "primary";
+    openButton.textContent = "この工事を開く";
+    openButton.addEventListener("click", () => {
       selectedProjectUid = project.projectUid;
       localStorage.setItem("aoALB:selectedProjectUid", selectedProjectUid);
       showView("photos");
     });
-    return button;
+    actions.append(openButton);
+    if (preview.eligible) {
+      const deleteButton = document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.className = "danger-outline";
+      deleteButton.textContent = "この端末から削除";
+      deleteButton.addEventListener("click", () => openProjectDeletionDialog(project.internalId));
+      actions.append(deleteButton);
+    } else if (isShared) {
+      actions.append(textElement("p", "共有工事の削除や終了は「工事を共有」から管理します。", "project-card-note"));
+    } else {
+      actions.append(textElement("p", preview.reasons[0] || "この工事は安全確認ができないため削除できません。", "project-card-note"));
+    }
+    card.append(actions);
+    return card;
   }));
   elements["project-list"].replaceChildren(...cards);
   elements["project-empty"].hidden = cards.length > 0;
+}
+
+function projectDeletionPhrase(project) {
+  return project.name || "（工事名なし）";
+}
+
+function renderProjectDeletionDialog(preview) {
+  projectDeletionPreview = preview;
+  const phrase = projectDeletionPhrase(preview.project);
+  elements["project-delete-name"].textContent = phrase;
+  elements["project-delete-photo-count"].textContent = `${preview.photoCount}件`;
+  elements["project-delete-ledger-count"].textContent = `${preview.ledgerCount}件`;
+  elements["project-delete-import-count"].textContent = `${preview.importCount}件`;
+  elements["project-delete-bytes"].textContent = `約${formatBytes(preview.estimatedBytes)}`;
+  elements["project-delete-imported-at"].textContent = formatDate(preview.importedAt);
+  elements["project-delete-confirm-name"].value = "";
+  elements["project-delete-confirm-name"].placeholder = phrase;
+  elements["project-delete-error"].hidden = true;
+  elements["project-delete-error"].textContent = "";
+  elements["project-delete-submit"].disabled = true;
+}
+
+async function openProjectDeletionDialog(projectInternalId) {
+  if (deletingProject) return;
+  try {
+    const preview = await getLocalProjectDeletionPreview(projectInternalId);
+    if (!preview.eligible) throw new Error(preview.reasons[0] || "この工事は削除できません。");
+    renderProjectDeletionDialog(preview);
+    elements["project-delete-dialog"].showModal();
+    elements["project-delete-confirm-name"].focus();
+  } catch (error) {
+    elements["project-message"].textContent = error?.message || "削除内容を確認できませんでした。";
+    elements["project-message"].className = "project-message error";
+  }
+}
+
+function releaseProjectDisplay(projectUid, ledgerIds) {
+  if (currentProject?.projectUid === projectUid) {
+    elements["photo-detail"].close();
+    revokeThumbnailUrls();
+    if (detailUrl) URL.revokeObjectURL(detailUrl);
+    detailUrl = null;
+    allPhotos = [];
+    currentProject = null;
+  }
+  if (selectedProjectUid === projectUid || localStorage.getItem("aoALB:selectedProjectUid") === projectUid) {
+    selectedProjectUid = "";
+    localStorage.removeItem("aoALB:selectedProjectUid");
+    ledgerEditor?.deactivate();
+  }
+  if (ledgerIds.includes(localStorage.getItem("aoALB:selectedLedgerId"))) localStorage.removeItem("aoALB:selectedLedgerId");
+}
+
+async function confirmProjectDeletion(event) {
+  event.preventDefault();
+  if (deletingProject || !projectDeletionPreview) return;
+  const phrase = projectDeletionPhrase(projectDeletionPreview.project);
+  if (elements["project-delete-confirm-name"].value !== phrase) return;
+
+  deletingProject = true;
+  elements["project-delete-submit"].disabled = true;
+  elements["project-delete-cancel"].disabled = true;
+  elements["project-delete-close"].disabled = true;
+  elements["project-delete-progress"].hidden = false;
+  elements["project-delete-error"].hidden = true;
+  try {
+    const result = await deleteLocalImportedProject(projectDeletionPreview.project.internalId, projectDeletionPreview.versionToken);
+    releaseProjectDisplay(result.project.projectUid, result.ledgerIds);
+    elements["project-delete-dialog"].close();
+    projectDeletionPreview = null;
+    elements["project-message"].textContent = `「${result.project.name || "工事名なし"}」をこの端末から削除しました。共有先や別の端末のデータは変更していません。`;
+    elements["project-message"].className = "project-message success";
+    await Promise.all([renderProjects(), renderHistory()]);
+    window.dispatchEvent(new CustomEvent("aoalb:local-project-deleted", { detail: { projectUid: result.project.projectUid } }));
+  } catch (error) {
+    const message = error?.message || "工事データを削除できませんでした。今回のデータは変更されていません。";
+    if (message.includes("確認し直して")) {
+      const refreshed = await getLocalProjectDeletionPreview(projectDeletionPreview.project.internalId).catch(() => null);
+      if (refreshed?.eligible) renderProjectDeletionDialog(refreshed);
+    }
+    elements["project-delete-error"].textContent = message;
+    elements["project-delete-error"].hidden = false;
+  } finally {
+    deletingProject = false;
+    elements["project-delete-cancel"].disabled = false;
+    elements["project-delete-close"].disabled = false;
+    elements["project-delete-progress"].hidden = true;
+    const preview = projectDeletionPreview;
+    elements["project-delete-submit"].disabled = !preview
+      || elements["project-delete-confirm-name"].value !== projectDeletionPhrase(preview.project);
+  }
 }
 
 function setSelectOptions(select, values) {
@@ -396,6 +522,29 @@ elements["clear-filters"].addEventListener("click", () => {
 });
 elements["close-detail"].addEventListener("click", () => elements["photo-detail"].close());
 elements["photo-detail"].addEventListener("close", () => { if (detailUrl) URL.revokeObjectURL(detailUrl); detailUrl = null; elements["detail-image"].removeAttribute("src"); });
+elements["project-delete-form"].addEventListener("submit", confirmProjectDeletion);
+elements["project-delete-confirm-name"].addEventListener("input", () => {
+  const preview = projectDeletionPreview;
+  elements["project-delete-submit"].disabled = deletingProject
+    || !preview
+    || elements["project-delete-confirm-name"].value !== projectDeletionPhrase(preview.project);
+});
+elements["project-delete-cancel"].addEventListener("click", () => {
+  if (!deletingProject) elements["project-delete-dialog"].close();
+});
+elements["project-delete-close"].addEventListener("click", () => {
+  if (!deletingProject) elements["project-delete-dialog"].close();
+});
+elements["project-delete-dialog"].addEventListener("cancel", event => {
+  if (deletingProject) event.preventDefault();
+});
+elements["project-delete-dialog"].addEventListener("close", () => {
+  if (!deletingProject) {
+    projectDeletionPreview = null;
+    elements["project-delete-confirm-name"].value = "";
+    elements["project-delete-error"].hidden = true;
+  }
+});
 window.addEventListener("hashchange", () => showView(location.hash.slice(1)));
 window.addEventListener("beforeunload", () => { revokeThumbnailUrls(); if (detailUrl) URL.revokeObjectURL(detailUrl); });
 window.addEventListener("aoalb:cloud-photos-updated", () => {

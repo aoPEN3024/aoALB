@@ -192,8 +192,11 @@ export async function getPhotoByInternalId(photoInternalId) {
   return requestResult(tx.objectStore("photos").get(photoInternalId));
 }
 
-const LOCAL_PROJECT_DELETE_STORES = ["imports", "projects", "photos", "photoFiles", "ledgers", "settings"];
+const LOCAL_PROJECT_DELETE_STORES = ["imports", "projects", "photos", "photoFiles", "cloudFiles", "ledgers", "settings"];
+const SYNC_QUEUE_KEY = "cloud:syncQueue";
 const PHOTO_SYNC_QUEUE_KEY = "cloud:photoSyncQueue";
+const CLOUD_IDENTITY_KEY = "cloud:identity";
+const SAFE_QUEUE_STATE = "synced";
 
 function importProjectUids(record) {
   const values = new Set();
@@ -217,6 +220,16 @@ function hasCloudSource(record) {
     || Boolean(record?.cloud?.siteId);
 }
 
+function hasZipSource(record) {
+  return record?.source === "zip" || record?.sources?.includes?.("zip");
+}
+
+function cloudSiteIds(record, values = new Set()) {
+  if (typeof record?.siteId === "string" && record.siteId) values.add(record.siteId);
+  if (typeof record?.cloud?.siteId === "string" && record.cloud.siteId) values.add(record.cloud.siteId);
+  return values;
+}
+
 function ledgerPhotoIds(ledger) {
   const values = new Set(Object.keys(ledger?.captionOverrides || {}));
   for (const page of ledger?.pages || []) {
@@ -227,18 +240,57 @@ function ledgerPhotoIds(ledger) {
   return values;
 }
 
-function deletionVersionToken({ project, photos, files, ledgers, imports, settings }) {
-  const queue = settings.find(record => record.key === PHOTO_SYNC_QUEUE_KEY)?.value;
-  const queueRefs = Array.isArray(queue)
-    ? queue.filter(item => item?.projectUid === project.projectUid).map(item => [item.eventId, item.photoUid, item.status])
-    : [];
+function referencesAny(value, identifiers, seen = new Set()) {
+  if (typeof value === "string") return identifiers.has(value);
+  if (!value || typeof value !== "object" || seen.has(value)) return false;
+  seen.add(value);
+  if (Array.isArray(value)) return value.some(item => referencesAny(item, identifiers, seen));
+  return Object.values(value).some(item => referencesAny(item, identifiers, seen));
+}
+
+function settingPlan(setting, identifiers, project) {
+  if (!referencesAny(setting?.value, identifiers)) return null;
+  if (setting.key === SYNC_QUEUE_KEY || setting.key === PHOTO_SYNC_QUEUE_KEY) {
+    const queue = Array.isArray(setting.value) ? setting.value : [];
+    return {
+      key: setting.key,
+      action: "put",
+      value: queue.filter(item => !referencesAny(item, identifiers)),
+      matched: queue.filter(item => referencesAny(item, identifiers))
+    };
+  }
+  const projectScoped = setting.key.includes(project.internalId)
+    || setting.key.includes(project.projectUid)
+    || setting.value?.projectInternalId === project.internalId
+    || setting.value?.projectUid === project.projectUid;
+  if (projectScoped) return { key: setting.key, action: "delete", matched: [setting.value] };
+  if (Array.isArray(setting.value)) {
+    return {
+      key: setting.key,
+      action: "put",
+      value: setting.value.filter(item => !referencesAny(item, identifiers)),
+      matched: setting.value.filter(item => referencesAny(item, identifiers))
+    };
+  }
+  return { key: setting.key, action: "block", matched: [setting.value] };
+}
+
+function deletionVersionToken({ project, photos, files, cloudFiles, ledgers, imports, settingPlans }) {
+  const comparableFiles = files.map(file => [
+    file.photoInternalId, file.photoUid, file.mimeType, Number(file.blob?.size || 0)
+  ]).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+  const comparableCloudFiles = cloudFiles.map(file => [
+    file.cacheKey, file.siteId, file.photoUid, file.kind, file.sha256,
+    Number(file.bytes || file.blob?.size || 0), Number(file.blob?.size || 0)
+  ]).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
   return JSON.stringify({
     project,
-    photos: photos.map(photo => [photo.internalId, photo.photoUid, photo.sha256, photo.updatedAt, photo.cloudSyncedAt]),
-    files: files.map(file => [file.photoInternalId, file.photoUid, file.blob?.size]),
-    ledgers: ledgers.map(ledger => [ledger.internalId, ledger.updatedAt, ledgerPhotoIds(ledger).size]),
-    imports: imports.map(record => [record.internalId, record.exportId, [...importProjectUids(record)].sort()]),
-    queueRefs
+    photos: photos.map(photo => structuredClone(photo)).sort((a, b) => String(a.internalId).localeCompare(String(b.internalId))),
+    files: comparableFiles,
+    cloudFiles: comparableCloudFiles,
+    ledgers: ledgers.map(ledger => structuredClone(ledger)).sort((a, b) => String(a.internalId).localeCompare(String(b.internalId))),
+    imports: imports.map(record => structuredClone(record)).sort((a, b) => String(a.internalId).localeCompare(String(b.internalId))),
+    settings: settingPlans.map(plan => [plan.key, plan.action, plan.matched]).sort((a, b) => String(a[0]).localeCompare(String(b[0])))
   });
 }
 
@@ -246,16 +298,23 @@ function buildLocalProjectDeletionPreview(data, projectInternalId) {
   const project = data.projects.find(item => item.internalId === projectInternalId);
   if (!project) throw new Error("削除対象の工事が見つかりません。");
 
-  const photos = data.photos.filter(photo => photo.projectUid === project.projectUid || photo.projectInternalId === project.internalId);
+  const photos = data.photos.filter(photo => photo.projectInternalId === project.internalId
+    || (!photo.projectInternalId && photo.projectUid === project.projectUid));
   const photoIds = new Set(photos.map(photo => photo.internalId));
   const photoUids = new Set(photos.map(photo => photo.photoUid));
   const files = data.photoFiles.filter(file => photoIds.has(file.photoInternalId) || photoUids.has(file.photoUid));
+  const cachedFiles = data.cloudFiles.filter(file => photoUids.has(file.photoUid));
   const ledgers = data.ledgers.filter(ledger => ledger.projectId === project.internalId);
   const imports = data.imports.filter(record => importProjectUids(record).has(project.projectUid));
   const otherLedgers = data.ledgers.filter(ledger => ledger.projectId !== project.internalId);
   const foreignLedgerReferences = otherLedgers.filter(ledger => [...ledgerPhotoIds(ledger)].some(photoId => photoIds.has(photoId)));
   const integrityErrors = [];
 
+  const conflictingProjects = data.projects.filter(item => item.internalId !== project.internalId && item.projectUid === project.projectUid);
+  if (conflictingProjects.length) integrityErrors.push("同じ工事識別情報を持つ別工事があるため、削除を中止しました。");
+  const conflictingPhotos = data.photos.filter(photo => photo.projectInternalId && photo.projectInternalId !== project.internalId
+    && photo.projectUid === project.projectUid);
+  if (conflictingPhotos.length) integrityErrors.push("別工事に属する写真が同じ工事識別情報を参照しています。");
   for (const photo of photos) {
     if (photo.projectUid !== project.projectUid || (photo.projectInternalId && photo.projectInternalId !== project.internalId)) {
       integrityErrors.push("写真と工事の関連が一致しません。");
@@ -270,34 +329,83 @@ function buildLocalProjectDeletionPreview(data, projectInternalId) {
   }
   if (foreignLedgerReferences.length) integrityErrors.push("別工事の台帳が対象写真を参照しています。");
 
-  const cloudBacked = hasCloudSource(project) || photos.some(hasCloudSource);
-  const importBacked = imports.some(record => record.status === "success");
+  const cloudBacked = hasCloudSource(project) || photos.some(hasCloudSource) || cachedFiles.length > 0;
+  const importBacked = hasZipSource(project) || photos.some(hasZipSource) || imports.some(record => record.status === "success");
+  const siteIds = cloudSiteIds(project);
+  for (const photo of photos) cloudSiteIds(photo, siteIds);
+  for (const file of cachedFiles) if (typeof file.siteId === "string" && file.siteId) siteIds.add(file.siteId);
+  const identity = data.settings.find(record => record.key === CLOUD_IDENTITY_KEY)?.value;
+  const destinationStatus = !cloudBacked ? "none"
+    : siteIds.size === 1 && identity?.siteId === [...siteIds][0] ? "known"
+      : "unknown_or_removed";
+  const sourceKind = importBacked && cloudBacked ? "mixed"
+    : importBacked ? "zip_only"
+      : cloudBacked ? (destinationStatus === "known" ? "cloud_only" : "cloud_unknown")
+        : "unknown";
+  const sourceLabel = {
+    zip_only: "ZIP取込みのみ",
+    cloud_only: "共有受信のみ",
+    mixed: "ZIP・共有混在",
+    cloud_unknown: "共有先不明または削除済み",
+    unknown: "判定不能"
+  }[sourceKind];
+
+  const identifiers = new Set([
+    project.internalId, project.projectUid,
+    ...photoIds, ...photoUids,
+    ...ledgers.map(ledger => ledger.internalId)
+  ].filter(value => typeof value === "string" && value));
+  const settingPlans = data.settings.map(setting => settingPlan(setting, identifiers, project)).filter(Boolean);
+  const photoQueuePlan = settingPlans.find(plan => plan.key === PHOTO_SYNC_QUEUE_KEY);
+  const syncQueuePlan = settingPlans.find(plan => plan.key === SYNC_QUEUE_KEY);
+  const photoQueueBlockers = (photoQueuePlan?.matched || []).filter(item => item?.status !== SAFE_QUEUE_STATE);
+  const syncQueueBlockers = (syncQueuePlan?.matched || []).filter(item => item?.status !== SAFE_QUEUE_STATE);
+  const unknownSettingPlans = settingPlans.filter(plan => plan.action === "block");
+  const uploadingCount = photoQueueBlockers.filter(item => item?.status === "uploading").length;
+  const unsentPhotoCount = photoQueueBlockers.length;
+  const pendingCloudChangeCount = syncQueueBlockers.length;
+
   const metadataBytes = serializedByteLength({ project, photos, ledgers, imports });
-  const imageBytes = files.reduce((sum, file) => sum + Number(file.blob?.size || 0), 0);
-  const versionToken = deletionVersionToken({ project, photos, files, ledgers, imports, settings: data.settings });
+  const localImageBytes = files.reduce((sum, file) => sum + Number(file.blob?.size || 0), 0);
+  const cloudCacheBytes = cachedFiles.reduce((sum, file) => sum + Number(file.blob?.size || file.bytes || 0), 0);
+  const versionToken = deletionVersionToken({
+    project, photos, files, cloudFiles: cachedFiles, ledgers, imports, settingPlans
+  });
   const reasons = [];
-  if (cloudBacked) reasons.push("現場で共有しているデータを含むため、この削除は利用できません。");
-  if (!importBacked) reasons.push("ZIP取込み済み工事として確認できません。");
+  if (unsentPhotoCount) reasons.push(`未送信または送信処理中の写真が${unsentPhotoCount}件あるため削除できません。`);
+  if (pendingCloudChangeCount) reasons.push(`共有先へ未反映の更新が${pendingCloudChangeCount}件あるため削除できません。`);
+  if (unknownSettingPlans.length) reasons.push("対象工事を参照する端末設定を安全に分離できません。");
   reasons.push(...integrityErrors);
 
   return {
     project: structuredClone(project),
     eligible: reasons.length === 0,
-    dataKind: cloudBacked ? "shared" : importBacked ? "zip" : "unknown",
+    dataKind: sourceKind,
+    sourceLabel,
+    cloudBacked,
+    importBacked,
+    destinationStatus,
+    cloudSiteCount: siteIds.size,
     reasons,
     photoCount: photos.length,
     ledgerCount: ledgers.length,
     importCount: imports.length,
-    imageBytes,
-    estimatedBytes: imageBytes + metadataBytes,
+    localImageBytes,
+    cloudCacheBytes,
+    estimatedBytes: localImageBytes + cloudCacheBytes + metadataBytes,
     fileCount: files.length,
+    cloudFileCount: cachedFiles.length,
     importedAt: project.lastImportedAt || imports.map(record => record.importedAt).sort().at(-1) || null,
     versionToken,
+    unsentPhotoCount,
+    uploadingCount,
+    pendingCloudChangeCount,
     photoInternalIds: [...photoIds],
     photoUids: [...photoUids],
     ledgerIds: ledgers.map(ledger => ledger.internalId),
     importIds: imports.map(record => record.internalId),
-    sharedImportCount: imports.filter(record => importProjectUids(record).size > 1).length
+    sharedImportCount: imports.filter(record => importProjectUids(record).size > 1).length,
+    settingPlans
   };
 }
 
@@ -329,7 +437,27 @@ function detachProjectFromImport(record, projectUid) {
   return { action: "update", record: next };
 }
 
-export async function deleteLocalImportedProject(projectInternalId, expectedVersionToken) {
+async function verifyDeletedProjectData(db, preview) {
+  const tx = db.transaction(LOCAL_PROJECT_DELETE_STORES, "readonly");
+  const data = await readLocalProjectDeletionData(tx);
+  const identifiers = new Set([
+    preview.project.internalId, preview.project.projectUid,
+    ...preview.photoInternalIds, ...preview.photoUids, ...preview.ledgerIds
+  ]);
+  const remains = {
+    projects: data.projects.filter(item => item.internalId === preview.project.internalId || item.projectUid === preview.project.projectUid).length,
+    photos: data.photos.filter(item => preview.photoInternalIds.includes(item.internalId) || preview.photoUids.includes(item.photoUid)).length,
+    photoFiles: data.photoFiles.filter(item => preview.photoInternalIds.includes(item.photoInternalId) || preview.photoUids.includes(item.photoUid)).length,
+    cloudFiles: data.cloudFiles.filter(item => preview.photoUids.includes(item.photoUid)).length,
+    ledgers: data.ledgers.filter(item => preview.ledgerIds.includes(item.internalId) || item.projectId === preview.project.internalId).length,
+    imports: data.imports.filter(item => importProjectUids(item).has(preview.project.projectUid)).length,
+    settings: data.settings.filter(item => item.key !== CLOUD_IDENTITY_KEY && referencesAny(item.value, identifiers)).length
+  };
+  if (Object.values(remains).some(Boolean)) throw new Error("削除後の確認で対象工事の端末データが残っています。");
+  return remains;
+}
+
+export async function deleteLocalProjectData(projectInternalId, expectedVersionToken) {
   const db = await openDatabase();
   const tx = db.transaction(LOCAL_PROJECT_DELETE_STORES, "readwrite");
   const done = transactionDone(tx);
@@ -348,6 +476,9 @@ export async function deleteLocalImportedProject(projectInternalId, expectedVers
     for (const file of data.photoFiles) {
       if (photoIds.has(file.photoInternalId) || photoUids.has(file.photoUid)) stores.photoFiles.delete(file.photoInternalId);
     }
+    for (const file of data.cloudFiles) {
+      if (photoUids.has(file.photoUid)) stores.cloudFiles.delete(file.cacheKey);
+    }
     for (const photo of data.photos) if (photoIds.has(photo.internalId)) stores.photos.delete(photo.internalId);
     for (const ledger of data.ledgers) if (ledger.projectId === preview.project.internalId) stores.ledgers.delete(ledger.internalId);
     for (const record of data.imports) {
@@ -355,27 +486,30 @@ export async function deleteLocalImportedProject(projectInternalId, expectedVers
       if (detached.action === "delete") stores.imports.delete(record.internalId);
       if (detached.action === "update") stores.imports.put(detached.record);
     }
-    for (const setting of data.settings) {
-      if (setting.key !== PHOTO_SYNC_QUEUE_KEY || !Array.isArray(setting.value)) continue;
-      const value = setting.value.filter(item => item?.projectUid !== preview.project.projectUid
-        && !photoIds.has(item?.photoInternalId)
-        && !photoUids.has(item?.photoUid));
-      if (value.length !== setting.value.length) stores.settings.put({ ...setting, value, updatedAt: new Date().toISOString() });
+    for (const plan of preview.settingPlans) {
+      if (plan.action === "delete") stores.settings.delete(plan.key);
+      if (plan.action === "put") {
+        const original = data.settings.find(setting => setting.key === plan.key);
+        stores.settings.put({ ...original, value: structuredClone(plan.value), updatedAt: new Date().toISOString() });
+      }
     }
     stores.projects.delete(preview.project.internalId);
 
     await done;
+    const remains = await verifyDeletedProjectData(db, preview);
     return {
       project: preview.project,
       deleted: {
         photos: preview.photoCount,
         files: preview.fileCount,
+        cloudFiles: preview.cloudFileCount,
         ledgers: preview.ledgerCount,
         imports: preview.importCount - preview.sharedImportCount
       },
       preservedSharedImports: preview.sharedImportCount,
       photoInternalIds: preview.photoInternalIds,
-      ledgerIds: preview.ledgerIds
+      ledgerIds: preview.ledgerIds,
+      remains
     };
   } catch (error) {
     try { tx.abort(); } catch (_) { /* already completed or aborted */ }
@@ -383,6 +517,9 @@ export async function deleteLocalImportedProject(projectInternalId, expectedVers
     throw error;
   }
 }
+
+// PR #17までの呼出し名を残し、既存ブックマークや検証コードとの互換性を維持する。
+export const deleteLocalImportedProject = deleteLocalProjectData;
 
 const cloudCacheKey = (photoUid, kind) => `${photoUid}:${kind}`;
 

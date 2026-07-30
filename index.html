@@ -7,7 +7,7 @@
   <meta name="theme-color" content="#1855a0">
   <title>aoALB 工事写真台帳</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231855a0'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-size='34' font-family='Arial' font-weight='700' fill='white'%3EA%3C/text%3E%3C/svg%3E">
-  <link rel="stylesheet" href="css/app.css?v=20260730-local-delete-pass-labels1">
+  <link rel="stylesheet" href="css/app.css?v=20260730-mixed-local-delete1">
   <link rel="stylesheet" href="css/print.css" media="print">
 </head>
 <body>
@@ -237,7 +237,7 @@
             <div><dt>この端末へ保存済み</dt><dd id="cloud-cache-original-count">0件</dd></div>
           </dl>
           <div class="sharing-actions">
-            <button id="cloud-clear-cache" type="button" class="secondary">この端末の写真データを削除</button>
+            <button id="cloud-clear-cache" type="button" class="secondary">写真本体をこの端末から削除</button>
           </div>
           <p id="cloud-receive-message" class="sharing-message" role="status" aria-live="polite"></p>
           <p class="limit-note">この操作で共有先の写真、写真情報、台帳配置は削除されません。必要になれば再度この端末へ保存できます。</p>
@@ -344,17 +344,22 @@
       <div class="project-delete-body">
         <p class="danger-notice">この操作では、この端末に保存されている写真・台帳・取込み情報を削除します。</p>
         <p>共有先や別の端末のデータ、aoPICのデータは削除されません。</p>
+        <p id="project-delete-cloud-warning" class="local-delete-notice" hidden>この操作で削除されるのは、この端末に保存されている写真・台帳・取込み情報だけです。共有先や別の端末のデータは削除されません。</p>
+        <p id="project-delete-destination-warning" class="local-delete-destination" hidden></p>
         <dl class="project-delete-summary">
           <div><dt>工事名</dt><dd id="project-delete-name"></dd></div>
+          <div><dt>データの由来</dt><dd id="project-delete-source"></dd></div>
+          <div><dt>端末内識別子</dt><dd id="project-delete-internal-id"></dd></div>
           <div><dt>写真</dt><dd id="project-delete-photo-count"></dd></div>
           <div><dt>台帳</dt><dd id="project-delete-ledger-count"></dd></div>
           <div><dt>取込み履歴</dt><dd id="project-delete-import-count"></dd></div>
+          <div><dt>共有写真キャッシュ</dt><dd id="project-delete-cache-count"></dd></div>
           <div><dt>使用容量</dt><dd id="project-delete-bytes"></dd></div>
           <div><dt>取込日時</dt><dd id="project-delete-imported-at"></dd></div>
         </dl>
         <section class="project-delete-columns">
-          <div><h3>削除される内容</h3><ul><li>この工事の写真と端末保存画像</li><li>この工事の台帳・配置・文言編集</li><li>この工事だけの取込み履歴</li></ul></div>
-          <div><h3>削除されない内容</h3><ul><li>共有先・別端末のデータ</li><li>別の工事とその写真・台帳</li><li>接続設定とログイン状態</li></ul></div>
+          <div><h3>この端末から削除</h3><ul><li>この工事の写真・JPEG・サムネイル</li><li>台帳・配置・文言編集</li><li>この工事だけの取込み・共有受信記録</li></ul></div>
+          <div><h3>削除されない内容</h3><ul><li>共有先・別端末・Supabaseのデータ</li><li>別の工事とその写真・台帳</li><li>接続設定とログイン状態、aoPICのデータ</li></ul></div>
         </section>
         <label class="project-delete-confirm">確認のため、上記の工事名を完全一致で入力してください
           <input id="project-delete-confirm-name" type="text" maxlength="2000" autocomplete="off">
@@ -364,7 +369,7 @@
       </div>
       <div class="project-delete-footer">
         <button id="project-delete-cancel" type="button" class="secondary">キャンセル</button>
-        <button id="project-delete-submit" type="submit" class="danger-button" disabled>この端末から完全に削除</button>
+        <button id="project-delete-submit" type="submit" class="local-delete-confirm-button" disabled>工事データをこの端末から削除</button>
       </div>
     </form>
   </dialog>
@@ -404,6 +409,6 @@
   </dialog>
 
   <script src="vendor/jszip.min.js"></script>
-  <script type="module" src="js/app.js?v=20260730-local-delete-pass-labels1"></script>
+  <script type="module" src="js/app.js?v=20260730-mixed-local-delete1"></script>
 </body>
 </html>

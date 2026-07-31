@@ -1,3 +1,7 @@
+import {
+  isVisiblePhoto, ledgerPhotoReferences, photoLifecycle, photoSourceKind
+} from "./photo-delete.js";
+
 const DB_NAME = "aoALBDB";
 const DB_VERSION = 4;
 
@@ -177,7 +181,13 @@ export async function estimateImportStorage(validated, estimateProvider = global
 export async function getPhotosByProjectUid(projectUid) {
   const db = await openDatabase();
   const tx = db.transaction("photos", "readonly");
-  return requestResult(tx.objectStore("photos").index("projectUid").getAll(projectUid));
+  const photos = await requestResult(tx.objectStore("photos").index("projectUid").getAll(projectUid));
+  return photos.filter(isVisiblePhoto);
+}
+
+export async function getTrashedPhotosBySite(siteId) {
+  const photos = await getAll("photos");
+  return photos.filter(photo => photo?.cloud?.siteId === siteId && photoLifecycle(photo) === "trashed");
 }
 
 export async function getPhotoFile(photoInternalId) {
@@ -190,6 +200,124 @@ export async function getPhotoByInternalId(photoInternalId) {
   const db = await openDatabase();
   const tx = db.transaction("photos", "readonly");
   return requestResult(tx.objectStore("photos").get(photoInternalId));
+}
+
+const PHOTO_DELETE_STORES = ["photos", "photoFiles", "cloudFiles", "ledgers", "settings"];
+
+async function readPhotoDeleteData(transaction) {
+  const requests = Object.fromEntries(PHOTO_DELETE_STORES.map(name => [name, transaction.objectStore(name).getAll()]));
+  const values = await Promise.all(PHOTO_DELETE_STORES.map(name => requestResult(requests[name])));
+  return Object.fromEntries(PHOTO_DELETE_STORES.map((name, index) => [name, values[index]]));
+}
+
+function photoQueueReferences(setting, photos) {
+  if (setting?.key !== PHOTO_SYNC_QUEUE_KEY) return [];
+  const ids = new Set(photos.flatMap(photo => [photo.internalId, photo.photoUid].filter(Boolean)));
+  return (Array.isArray(setting.value) ? setting.value : []).filter(item => referencesAny(item, ids));
+}
+
+export function buildPhotoDeletionPreviewForData(data, photoInternalIds) {
+  const requested = [...new Set((photoInternalIds || []).filter(value => typeof value === "string" && value))];
+  if (!requested.length) throw new Error("写真を1枚以上選択してください。");
+  if (requested.length > 200) throw new Error("一度に削除できる写真は200枚までです。");
+  const photos = requested.map(id => data.photos.find(photo => photo.internalId === id));
+  if (photos.some(photo => !photo)) throw new Error("削除対象の写真が見つかりません。");
+
+  const projectUids = new Set(photos.map(photo => photo.projectUid));
+  if (projectUids.size !== 1) throw new Error("異なる工事の写真は分けて削除してください。");
+  const sources = photos.map(photoSourceKind);
+  const sourceKinds = new Set(sources.map(kind => kind === "mixed" ? "cloud" : kind));
+  const reasons = [];
+  if (sources.includes("unknown")) reasons.push("保存元を安全に確認できない写真が含まれています。");
+  if (sourceKinds.size > 1) reasons.push("この端末だけの写真と共有写真は、分けて削除してください。");
+
+  const photoIds = new Set(photos.map(photo => photo.internalId));
+  const photoUids = new Set(photos.map(photo => photo.photoUid));
+  const files = data.photoFiles.filter(file => photoIds.has(file.photoInternalId) || photoUids.has(file.photoUid));
+  const cachedFiles = data.cloudFiles.filter(file => photoUids.has(file.photoUid));
+  const references = ledgerPhotoReferences(data.ledgers, photoIds);
+  if (references.length) reasons.push(`台帳で使用中の写真が${new Set(references.map(ref => ref.photoId)).size}枚あります。`);
+
+  const queueItems = data.settings.flatMap(setting => photoQueueReferences(setting, photos));
+  const unsafeQueueItems = queueItems.filter(item => item?.status !== "synced");
+  if (unsafeQueueItems.length) reasons.push(`未送信または送信処理中の写真が${unsafeQueueItems.length}件あります。`);
+
+  const kind = sourceKinds.size === 1 ? [...sourceKinds][0] : "mixed_selection";
+  const localBytes = files.reduce((sum, file) => sum + Number(file.blob?.size || 0), 0);
+  const cacheBytes = cachedFiles.reduce((sum, file) => sum + Number(file.blob?.size || file.bytes || 0), 0);
+  const versionToken = JSON.stringify({
+    photos: photos.map(photo => structuredClone(photo)),
+    files: files.map(file => [file.photoInternalId, file.photoUid, Number(file.blob?.size || 0)]),
+    cachedFiles: cachedFiles.map(file => [file.cacheKey, file.photoUid, Number(file.blob?.size || 0)]),
+    references,
+    queueItems
+  });
+  return {
+    eligible: reasons.length === 0,
+    reasons,
+    kind,
+    photos: photos.map(photo => structuredClone(photo)),
+    photoCount: photos.length,
+    zipCount: sources.filter(source => source === "zip").length,
+    cloudCount: sources.filter(source => source === "cloud").length,
+    mixedCount: sources.filter(source => source === "mixed").length,
+    ledgerReferences: references,
+    queueCount: unsafeQueueItems.length,
+    estimatedBytes: localBytes + cacheBytes,
+    versionToken
+  };
+}
+
+export async function getPhotoDeletionPreview(photoInternalIds) {
+  const db = await openDatabase();
+  const tx = db.transaction(PHOTO_DELETE_STORES, "readonly");
+  return buildPhotoDeletionPreviewForData(await readPhotoDeleteData(tx), photoInternalIds);
+}
+
+export async function deleteLocalPhotos(photoInternalIds, expectedVersionToken) {
+  const db = await openDatabase();
+  const tx = db.transaction(PHOTO_DELETE_STORES, "readwrite");
+  const done = transactionDone(tx);
+  try {
+    const data = await readPhotoDeleteData(tx);
+    const preview = buildPhotoDeletionPreviewForData(data, photoInternalIds);
+    if (!preview.eligible) throw new Error(preview.reasons[0] || "写真を削除できません。");
+    if (preview.kind !== "zip") throw new Error("共有写真は共有のごみ箱から削除してください。");
+    if (!expectedVersionToken || preview.versionToken !== expectedVersionToken) {
+      throw new Error("確認後に写真または台帳が変更されました。内容を確認し直してください。");
+    }
+    const ids = new Set(preview.photos.map(photo => photo.internalId));
+    const uids = new Set(preview.photos.map(photo => photo.photoUid));
+    const stores = Object.fromEntries(PHOTO_DELETE_STORES.map(name => [name, tx.objectStore(name)]));
+    for (const file of data.photoFiles) {
+      if (ids.has(file.photoInternalId) || uids.has(file.photoUid)) stores.photoFiles.delete(file.photoInternalId);
+    }
+    for (const file of data.cloudFiles) {
+      if (uids.has(file.photoUid)) stores.cloudFiles.delete(file.cacheKey);
+    }
+    for (const photo of preview.photos) stores.photos.delete(photo.internalId);
+    for (const setting of data.settings) {
+      if (setting.key !== PHOTO_SYNC_QUEUE_KEY || !Array.isArray(setting.value)) continue;
+      const value = setting.value.filter(item => !referencesAny(item, new Set([...ids, ...uids])));
+      if (value.length !== setting.value.length) {
+        stores.settings.put({ ...setting, value, updatedAt: new Date().toISOString() });
+      }
+    }
+    await done;
+    const verify = await Promise.all(preview.photos.map(async photo => ({
+      photo: await getPhotoByInternalId(photo.internalId),
+      file: await getPhotoFile(photo.internalId),
+      caches: (await getAll("cloudFiles")).filter(file => file.photoUid === photo.photoUid)
+    })));
+    if (verify.some(result => result.photo || result.file || result.caches.length)) {
+      throw new Error("削除後の確認で写真データが残っています。");
+    }
+    return { deleted: preview.photoCount, photoInternalIds: [...ids], photoUids: [...uids] };
+  } catch (error) {
+    try { tx.abort(); } catch (_) { /* transaction already completed or aborted */ }
+    await done.catch(() => {});
+    throw error;
+  }
 }
 
 const LOCAL_PROJECT_DELETE_STORES = ["imports", "projects", "photos", "photoFiles", "cloudFiles", "ledgers", "settings"];
@@ -575,6 +703,8 @@ function normalizeCloudPhoto(row, project, existing, syncedAt) {
   const ledger = metadata.ledger && typeof metadata.ledger === "object" ? metadata.ledger : {};
   const cloud = {
     siteId: row.siteId, remotePhotoId: row.id, status: "complete",
+    lifecycleStatus: row.lifecycleStatus || "active", revision: Number(row.revision || 1),
+    trashedAt: row.trashedAt || null,
     originalPath: row.objectPath, thumbnailPath: row.thumbnailPath,
     thumbnailSha256: row.thumbnailSha256, thumbnailBytes: Number(row.thumbnailBytes || 0),
     thumbnailWidth: Number(row.thumbnailWidth || 0), thumbnailHeight: Number(row.thumbnailHeight || 0),
@@ -615,6 +745,7 @@ export async function mergeCloudSnapshot(siteId, remoteProjects, remotePhotos) {
   let reused = 0;
   try {
     const projects = new Map();
+    const activePhotoUids = new Set(remotePhotos.map(photo => photo.photoUid));
     for (const remote of remoteProjects) {
       let project = await requestResult(projectStore.index("projectUid").get(remote.projectUid));
       if (!project) {
@@ -645,8 +776,57 @@ export async function mergeCloudSnapshot(siteId, remoteProjects, remotePhotos) {
       photoStore.put(normalized);
       existing ? reused += 1 : added += 1;
     }
+    const allLocalPhotos = await requestResult(photoStore.getAll());
+    for (const photo of allLocalPhotos) {
+      if (photo?.cloud?.siteId !== siteId || activePhotoUids.has(photo.photoUid)) continue;
+      photoStore.put({
+        ...photo,
+        cloud: { ...photo.cloud, lifecycleStatus: "trashed" },
+        cloudSyncedAt: syncedAt
+      });
+    }
     await done;
     return { added, reused, projectCount: projects.size, photoCount: remotePhotos.length };
+  } catch (error) {
+    try { tx.abort(); } catch (_) { /* already completed or aborted */ }
+    await done.catch(() => {});
+    throw error;
+  }
+}
+
+export async function mergeCloudTrashSnapshot(siteId, remoteProjects, remotePhotos) {
+  const rows = remotePhotos.map(photo => ({ ...photo, lifecycleStatus: "trashed" }));
+  const db = await openDatabase();
+  const tx = db.transaction(["projects", "photos"], "readwrite");
+  const done = transactionDone(tx);
+  const projectStore = tx.objectStore("projects");
+  const photoStore = tx.objectStore("photos");
+  const syncedAt = new Date().toISOString();
+  try {
+    const projectByRemoteId = new Map();
+    for (const remote of remoteProjects) {
+      let project = await requestResult(projectStore.index("projectUid").get(remote.projectUid));
+      if (!project) {
+        project = {
+          internalId: crypto.randomUUID(), projectUid: remote.projectUid, koujiId: remote.koujiId ?? null,
+          name: remote.name, contractor: remote.contractor || "", source: "cloud", sources: ["cloud"],
+          siteId, createdAt: syncedAt, lastImportedAt: syncedAt, lastCloudSyncedAt: syncedAt
+        };
+        projectStore.add(project);
+      }
+      projectByRemoteId.set(remote.id, project);
+    }
+    for (const remote of rows) {
+      const project = projectByRemoteId.get(remote.projectId);
+      if (!project) continue;
+      const existing = await requestResult(photoStore.index("photoUid").get(remote.photoUid));
+      if (existing && existing.sha256 !== remote.sha256) {
+        throw new Error(`photoUid ${remote.photoUid} のSHA-256が端末内写真と異なります。`);
+      }
+      photoStore.put(normalizeCloudPhoto({ ...remote, siteId }, project, existing, syncedAt));
+    }
+    await done;
+    return { trashedCount: rows.length };
   } catch (error) {
     try { tx.abort(); } catch (_) { /* already completed or aborted */ }
     await done.catch(() => {});

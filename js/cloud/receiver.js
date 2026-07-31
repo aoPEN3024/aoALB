@@ -1,6 +1,6 @@
 import {
   clearCloudCache, getCloudCacheSummary, getCloudFile, getPhotoByInternalId, getPhotoByUid, getPhotoFile,
-  getPhotosByProjectUid, getProjects, mergeCloudSnapshot, saveCloudFile
+  getPhotosByProjectUid, getProjects, mergeCloudSnapshot, mergeCloudTrashSnapshot, saveCloudFile
 } from "../storage.js";
 
 let provider = null;
@@ -79,11 +79,23 @@ export async function syncCloudPhotos() {
   return syncPromise;
 }
 
+export async function syncCloudTrash() {
+  if (!provider || !identity?.siteId || identity.role !== "admin") {
+    return { skipped: true, reason: "admin-required" };
+  }
+  if (!online()) return { skipped: true, reason: "offline" };
+  const siteId = identity.siteId;
+  const snapshot = await provider.listTrashedPhotoSnapshot(siteId);
+  if (identity?.siteId !== siteId) return { skipped: true, reason: "site-changed" };
+  return mergeCloudTrashSnapshot(siteId, snapshot.projects, snapshot.photos);
+}
+
 export async function loadPhotoAsset(photoInternalId, kind = "original", options = {}) {
   const local = await getPhotoFile(photoInternalId);
   if (local?.blob) return { ...local, source: "local" };
   const photo = await getPhotoByInternalId(photoInternalId);
   if (!photo?.cloud || photo.cloud.status !== "complete") return null;
+  if (photo.cloud.lifecycleStatus === "trashed" && options.includeTrashed !== true) return null;
   const cached = await getCloudFile(photo.photoUid, kind);
   if (cached?.blob) return { ...cached, source: "cloud-cache" };
   if (!provider || identity?.siteId !== photo.cloud.siteId || !online()) return null;

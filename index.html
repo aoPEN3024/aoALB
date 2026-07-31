@@ -7,7 +7,7 @@
   <meta name="theme-color" content="#1855a0">
   <title>aoALB 工事写真台帳</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231855a0'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-size='34' font-family='Arial' font-weight='700' fill='white'%3EA%3C/text%3E%3C/svg%3E">
-  <link rel="stylesheet" href="css/app.css?v=20260730-mixed-local-delete1">
+  <link rel="stylesheet" href="css/app.css?v=20260731-photo-delete1">
   <link rel="stylesheet" href="css/print.css" media="print">
 </head>
 <body>
@@ -95,7 +95,20 @@
         <label>並び替え<select id="photo-sort"><option value="captured-asc">撮影日時 昇順</option><option value="captured-desc">撮影日時 降順</option><option value="koushu">工種順</option></select></label>
         <button id="clear-filters" type="button" class="secondary">条件をクリア</button>
       </div>
-      <div class="list-summary"><span id="photo-count">0件</span></div>
+      <div class="photo-action-bar">
+        <div class="photo-list-modes" role="group" aria-label="写真の表示">
+          <button id="show-active-photos" type="button" class="secondary active">写真</button>
+          <button id="show-trashed-photos" type="button" class="secondary" hidden>削除済み</button>
+        </div>
+        <div class="photo-selection-actions">
+          <button id="photo-select-mode" type="button" class="secondary">写真を選択</button>
+          <button id="photo-select-all" type="button" class="secondary" hidden>表示中をすべて選択</button>
+          <button id="photo-select-clear" type="button" class="secondary" hidden>選択解除</button>
+          <button id="photo-delete-selected" type="button" class="danger-outline" hidden disabled>選択した写真を削除</button>
+        </div>
+      </div>
+      <div class="list-summary"><span id="photo-count">0件</span><span id="photo-selected-count" hidden>選択中 0件</span></div>
+      <p id="photo-action-message" class="project-message" role="status" aria-live="polite"></p>
       <div id="photo-list" class="photo-grid"></div>
       <p id="photo-empty" class="empty-state" hidden>条件に一致する写真はありません。</p>
     </section>
@@ -333,6 +346,43 @@
       <div class="detail-image-wrap"><img id="detail-image" alt="工事写真"></div>
       <div id="detail-fields" class="detail-fields"></div>
     </div>
+    <div class="detail-actions">
+      <button id="detail-delete-photo" type="button" class="danger-outline">この写真を削除</button>
+      <button id="detail-restore-photo" type="button" class="secondary" hidden>この写真を復元</button>
+    </div>
+  </dialog>
+
+  <dialog id="photo-delete-dialog" class="photo-delete-dialog">
+    <form id="photo-delete-form">
+      <div class="dialog-header">
+        <h2>写真を削除</h2>
+        <button id="photo-delete-close" type="button" aria-label="閉じる">×</button>
+      </div>
+      <div class="photo-delete-body">
+        <p id="photo-delete-explanation"></p>
+        <dl class="photo-delete-summary">
+          <div><dt>選択</dt><dd id="photo-delete-count"></dd></div>
+          <div><dt>この端末だけの写真</dt><dd id="photo-delete-zip-count"></dd></div>
+          <div><dt>共有写真</dt><dd id="photo-delete-cloud-count"></dd></div>
+          <div><dt>台帳で使用中</dt><dd id="photo-delete-ledger-count"></dd></div>
+          <div><dt>端末から減る容量</dt><dd id="photo-delete-bytes"></dd></div>
+        </dl>
+        <section id="photo-delete-ledger-references" class="photo-delete-ledger-references" hidden>
+          <h3>先に台帳から外してください</h3>
+          <ul id="photo-delete-ledger-list"></ul>
+        </section>
+        <p id="photo-delete-warning" class="danger-notice"></p>
+        <label class="photo-delete-confirm">確認のため「<strong id="photo-delete-phrase"></strong>」と入力してください
+          <input id="photo-delete-confirm-text" type="text" maxlength="40" autocomplete="off">
+        </label>
+        <p id="photo-delete-error" class="project-delete-error" role="alert" hidden></p>
+        <p id="photo-delete-progress" class="project-delete-progress" hidden>削除処理中です。画面を閉じないでください。</p>
+      </div>
+      <div class="project-delete-footer">
+        <button id="photo-delete-cancel" type="button" class="secondary">キャンセル</button>
+        <button id="photo-delete-submit" type="submit" class="local-delete-confirm-button" disabled>削除する</button>
+      </div>
+    </form>
   </dialog>
 
   <dialog id="project-delete-dialog" class="project-delete-dialog">
@@ -409,6 +459,6 @@
   </dialog>
 
   <script src="vendor/jszip.min.js"></script>
-  <script type="module" src="js/app.js?v=20260730-mixed-local-delete1"></script>
+  <script type="module" src="js/app.js?v=20260731-photo-delete1"></script>
 </body>
 </html>

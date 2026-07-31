@@ -116,7 +116,7 @@ export async function retryPhotoQueueErrors(siteId) {
   const queue = await getPhotoSyncQueue();
   let changed = false;
   for (const item of queue) {
-    if (item.siteId !== siteId || item.status !== "error") continue;
+    if (item.siteId !== siteId || item.status !== "error" || item.errorType === "shared_deleted") continue;
     item.status = "pending";
     item.lastError = "";
     item.errorType = "";

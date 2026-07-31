@@ -69,6 +69,7 @@ export function classifyPhotoSyncError(error) {
   if (/jwt|session|auth|sign.?in|ログイン|認証/i.test(message) || ["401", "PGRST301"].includes(code)) return { type: "auth", message: "認証の有効期限を確認できません。現場へ再接続してください。" };
   if (/row.level|permission|policy|forbidden|権限/i.test(message) || ["403", "42501"].includes(code)) return { type: "permission", message: "この現場へ写真を保存する権限がありません。" };
   if (/quota|storage.*full|容量.*不足|insufficient storage/i.test(message) || code === "507") return { type: "quota", message: "クラウドまたは端末の保存容量が不足しています。" };
+  if (code === "PHOTO_TRASHED") return { type: "shared_deleted", message };
   if (/fetch|network|offline|通信|connection/i.test(message)) return { type: "network", message: "通信が中断されました。次回起動時または再開後に送信します。" };
   if (/SHA-256|JPEG|サムネイル|ファイル容量/.test(message)) return { type: "integrity", message };
   return { type: "unknown", message };

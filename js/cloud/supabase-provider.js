@@ -149,6 +149,20 @@ async function buildSupabaseProvider(config) {
         }
       }
 
+      const { data: uploadStateRows, error: uploadStateError } = await client.rpc("check_photo_upload_state", {
+        p_site_id: siteId, p_photo_uid: photo.photoUid, p_sha256: photo.sha256
+      });
+      if (uploadStateError) throw uploadStateError;
+      const uploadState = Array.isArray(uploadStateRows) ? uploadStateRows[0] : uploadStateRows;
+      if (uploadState?.upload_state === "trashed") {
+        const error = new Error("この写真は共有先の「削除済み」にあります。管理者が復元するまで再送しません。");
+        error.code = "PHOTO_TRASHED";
+        throw error;
+      }
+      if (uploadState?.upload_state === "conflict") {
+        throw new Error("共有先に同じ識別情報の異なる写真があります。管理者へ確認してください。");
+      }
+
       let { data: photoRow, error: photoReadError } = await client.from("photos")
         .select("id,project_id,photo_uid,sha256,bytes,width,height").eq("site_id", siteId).eq("photo_uid", photo.photoUid).maybeSingle();
       if (photoReadError) throw photoReadError;
@@ -243,7 +257,8 @@ async function buildSupabaseProvider(config) {
       const photos = [];
       for (let offset = 0; offset < photoIds.length; offset += 200) {
         const { data, error } = await client.from("photos")
-          .select("id,project_id,photo_uid,captured_at,sha256,mime_type,width,height,bytes,metadata,updated_at")
+          .select("id,project_id,photo_uid,captured_at,sha256,mime_type,width,height,bytes,metadata,revision,lifecycle_status,trashed_at,updated_at")
+          .eq("lifecycle_status", "active")
           .eq("site_id", siteId).in("id", photoIds.slice(offset, offset + 200));
         if (error) throw error;
         photos.push(...(data || []));
@@ -258,6 +273,8 @@ async function buildSupabaseProvider(config) {
           id: row.id, projectId: row.project_id, photoUid: row.photo_uid, capturedAt: row.captured_at,
           sha256: row.sha256, mimeType: row.mime_type, width: row.width, height: row.height,
           bytes: Number(row.bytes), metadata: row.metadata, updatedAt: row.updated_at,
+          revision: Number(row.revision || 1), lifecycleStatus: row.lifecycle_status || "active",
+          trashedAt: row.trashed_at || null,
           objectPath: object.object_path, thumbnailPath: object.thumbnail_object_path,
           thumbnailSha256: object.thumbnail_sha256, thumbnailBytes: Number(object.thumbnail_bytes),
           thumbnailWidth: object.thumbnail_width, thumbnailHeight: object.thumbnail_height,
@@ -265,6 +282,67 @@ async function buildSupabaseProvider(config) {
         };
       });
       return { projects: normalizedProjects, photos: normalizedPhotos };
+    },
+    async listTrashedPhotoSnapshot(siteId) {
+      const { data: projects, error: projectError } = await client.from("projects")
+        .select("id,project_uid,kouji_id,name,contractor,updated_at").eq("site_id", siteId);
+      if (projectError) throw projectError;
+      const { data: rows, error: photoError } = await client.from("photos")
+        .select("id,project_id,photo_uid,captured_at,sha256,mime_type,width,height,bytes,metadata,revision,lifecycle_status,trashed_at,updated_at")
+        .eq("site_id", siteId).eq("lifecycle_status", "trashed").order("trashed_at", { ascending: false });
+      if (photoError) throw photoError;
+      const photoIds = (rows || []).map(row => row.id);
+      const objects = [];
+      for (let offset = 0; offset < photoIds.length; offset += 200) {
+        const { data, error } = await client.from("photo_objects")
+          .select("photo_id,object_path,sha256,bytes,upload_completed_at,thumbnail_object_path,thumbnail_sha256,thumbnail_bytes,thumbnail_width,thumbnail_height")
+          .eq("site_id", siteId).in("photo_id", photoIds.slice(offset, offset + 200));
+        if (error) throw error;
+        objects.push(...(data || []));
+      }
+      const objectByPhoto = new Map(objects.map(row => [row.photo_id, row]));
+      return {
+        projects: (projects || []).map(row => ({
+          id: row.id, projectUid: row.project_uid, koujiId: row.kouji_id,
+          name: row.name, contractor: row.contractor, updatedAt: row.updated_at
+        })),
+        photos: (rows || []).flatMap(row => {
+          const object = objectByPhoto.get(row.id);
+          if (!object) return [];
+          return [{
+            id: row.id, projectId: row.project_id, photoUid: row.photo_uid,
+            capturedAt: row.captured_at, sha256: row.sha256, mimeType: row.mime_type,
+            width: row.width, height: row.height, bytes: Number(row.bytes),
+            metadata: row.metadata, updatedAt: row.updated_at,
+            revision: Number(row.revision || 1), lifecycleStatus: row.lifecycle_status,
+            trashedAt: row.trashed_at,
+            objectPath: object.object_path, thumbnailPath: object.thumbnail_object_path,
+            thumbnailSha256: object.thumbnail_sha256, thumbnailBytes: Number(object.thumbnail_bytes),
+            thumbnailWidth: object.thumbnail_width, thumbnailHeight: object.thumbnail_height,
+            completedAt: object.upload_completed_at
+          }];
+        })
+      };
+    },
+    async photoLedgerReferences(photoId) {
+      const { data, error } = await client.rpc("photo_ledger_references", { p_photo_id: photoId });
+      if (error) throw error;
+      return data || [];
+    },
+    async trashPhotos(items) {
+      const { data, error } = await client.rpc("trash_photos", {
+        p_photo_ids: items.map(item => item.remotePhotoId),
+        p_expected_revisions: items.map(item => Number(item.revision))
+      });
+      if (error) throw error;
+      return data || [];
+    },
+    async restorePhoto(remotePhotoId, revision) {
+      const { data, error } = await client.rpc("restore_photo", {
+        p_photo_id: remotePhotoId, p_expected_revision: Number(revision)
+      });
+      if (error) throw error;
+      return data;
     },
     async downloadPhotoObject(path) {
       if (typeof path !== "string" || !/^[0-9a-f-]{36}\/(photos|thumbnails)\/[0-9a-f-]{36}\.jpg$/.test(path)) {

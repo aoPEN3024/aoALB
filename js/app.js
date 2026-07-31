@@ -2,11 +2,13 @@ import { validateAoalbZip, ImportValidationError } from "./importer.js";
 import {
   openDatabase, getImportByExportId, getProjects, getImports, getPhotosByProjectUid,
   analyzeImportConflicts, estimateImportStorage, saveValidatedImport, recordFailedImport,
-  getLocalProjectDeletionPreview, deleteLocalProjectData
+  getLocalProjectDeletionPreview, deleteLocalProjectData, getTrashedPhotosBySite,
+  getPhotoDeletionPreview, deleteLocalPhotos
 } from "./storage.js";
 import { initLedgerEditor } from "./ledger.js";
-import { initSiteSharing } from "./sharing.js?v=20260729-admin-recovery1";
-import { loadPhotoAsset } from "./cloud/receiver.js";
+import { initSiteSharing } from "./sharing.js?v=20260731-photo-delete2";
+import { loadPhotoAsset, syncCloudTrash } from "./cloud/receiver.js";
+import { photoDeleteConfirmation, photoSourceKind } from "./photo-delete.js";
 
 const views = ["import", "projects", "photos", "ledgers", "history", "sharing"];
 const elements = Object.fromEntries(Array.from(document.querySelectorAll("[id]"), element => [element.id, element]));
@@ -22,6 +24,12 @@ let ledgerEditor = null;
 let sharingController = null;
 let projectDeletionPreview = null;
 let deletingProject = false;
+let photoSelectionMode = false;
+let photoListMode = "active";
+let selectedPhotoIds = new Set();
+let currentDetailPhoto = null;
+let photoDeletionPreview = null;
+let deletingPhotos = false;
 
 class StorageCapacityError extends Error {
   constructor(requiredBytes, availableBytes) {
@@ -38,6 +46,15 @@ function formatBytes(value) {
   const [base, unit] = units.find(([size]) => bytes >= size) || [1, "bytes"];
   const digits = base === 1 ? 0 : bytes / base >= 10 ? 1 : 2;
   return `${new Intl.NumberFormat("ja-JP", { maximumFractionDigits: digits }).format(bytes / base)} ${unit}`;
+}
+
+function photoLifecycleContext() {
+  return sharingController?.photoLifecycleContext?.() || { provider: null, identity: null, mode: "local" };
+}
+
+function setPhotoActionMessage(message = "", error = false) {
+  elements["photo-action-message"].textContent = message;
+  elements["photo-action-message"].className = `project-message${error ? " error" : message ? " success" : ""}`;
 }
 
 function isQuotaError(error) {
@@ -397,6 +414,15 @@ function revokeThumbnailUrls() {
 }
 
 function createPhotoCard(photo) {
+  const wrapper = document.createElement("div");
+  wrapper.className = `photo-select-card${selectedPhotoIds.has(photo.internalId) ? " selected" : ""}`;
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.className = "photo-select-check";
+  checkbox.checked = selectedPhotoIds.has(photo.internalId);
+  checkbox.hidden = !photoSelectionMode || photoListMode !== "active";
+  checkbox.setAttribute("aria-label", `${formatDate(photo.capturedAt)}の写真を選択`);
+  checkbox.addEventListener("change", () => togglePhotoSelection(photo.internalId, checkbox.checked));
   const button = document.createElement("button");
   button.type = "button";
   button.className = "photo-card";
@@ -412,8 +438,16 @@ function createPhotoCard(photo) {
     textElement("p", [photo.classification.koushu, photo.classification.sokuten].filter(Boolean).join(" / ") || "未分類")
   );
   button.append(image, info);
-  button.addEventListener("click", () => showPhotoDetail(photo));
-  return button;
+  button.addEventListener("click", () => {
+    if (photoSelectionMode && photoListMode === "active") {
+      togglePhotoSelection(photo.internalId, !selectedPhotoIds.has(photo.internalId));
+    } else {
+      showPhotoDetail(photo);
+    }
+  });
+  wrapper.append(button, checkbox);
+  if (photoListMode === "trashed") wrapper.append(textElement("span", "削除済み", "photo-trash-badge"));
+  return wrapper;
 }
 
 function observeThumbnails() {
@@ -441,6 +475,7 @@ function renderPhotoCards() {
   elements["photo-list"].replaceChildren(...photos.map(createPhotoCard));
   elements["photo-empty"].hidden = photos.length > 0;
   if (photos.length) observeThumbnails();
+  renderPhotoSelectionState();
 }
 
 async function renderPhotoView() {
@@ -451,9 +486,51 @@ async function renderPhotoView() {
     allPhotos = [];
   } else {
     elements["selected-project-name"].textContent = `${currentProject.name} / ${currentProject.contractor || "施工者未設定"}`;
-    allPhotos = await getPhotosByProjectUid(currentProject.projectUid);
+    if (photoListMode === "trashed") {
+      const { identity } = photoLifecycleContext();
+      if (identity?.role === "admin" && identity.siteId === currentProject.siteId) {
+        await syncCloudTrash().catch(error => setPhotoActionMessage(error.message || "削除済み写真を取得できません。", true));
+        allPhotos = (await getTrashedPhotosBySite(identity.siteId))
+          .filter(photo => photo.projectUid === currentProject.projectUid);
+      } else {
+        allPhotos = [];
+        photoListMode = "active";
+      }
+    }
+    if (photoListMode === "active") allPhotos = await getPhotosByProjectUid(currentProject.projectUid);
+  }
+  const { identity } = photoLifecycleContext();
+  const canViewTrash = Boolean(currentProject?.siteId && identity?.siteId === currentProject.siteId && identity.role === "admin");
+  elements["show-trashed-photos"].hidden = !canViewTrash;
+  elements["show-active-photos"].classList.toggle("active", photoListMode === "active");
+  elements["show-trashed-photos"].classList.toggle("active", photoListMode === "trashed");
+  elements["photo-select-mode"].hidden = photoListMode !== "active";
+  if (photoListMode !== "active") {
+    photoSelectionMode = false;
+    selectedPhotoIds.clear();
   }
   setupFilterOptions();
+  renderPhotoCards();
+}
+
+function renderPhotoSelectionState() {
+  const selected = selectedPhotoIds.size;
+  const selectedBytes = allPhotos.reduce(
+    (total, photo) => selectedPhotoIds.has(photo.internalId) ? total + Math.max(0, Number(photo.bytes) || 0) : total,
+    0
+  );
+  elements["photo-selected-count"].hidden = !photoSelectionMode;
+  elements["photo-selected-count"].textContent = `選択中 ${selected}件・約${formatBytes(selectedBytes)}`;
+  elements["photo-select-all"].hidden = !photoSelectionMode;
+  elements["photo-select-clear"].hidden = !photoSelectionMode;
+  elements["photo-delete-selected"].hidden = !photoSelectionMode;
+  elements["photo-delete-selected"].disabled = selected === 0 || deletingPhotos;
+  elements["photo-select-mode"].textContent = photoSelectionMode ? "選択を終了" : "写真を選択";
+}
+
+function togglePhotoSelection(photoInternalId, selected) {
+  if (selected) selectedPhotoIds.add(photoInternalId);
+  else selectedPhotoIds.delete(photoInternalId);
   renderPhotoCards();
 }
 
@@ -473,10 +550,11 @@ function detailGroup(title, fields) {
 }
 
 async function showPhotoDetail(photo) {
+  currentDetailPhoto = photo;
   if (detailUrl) URL.revokeObjectURL(detailUrl);
   detailUrl = null;
   elements["detail-image"].removeAttribute("src");
-  const file = await loadPhotoAsset(photo.internalId, "original");
+  const file = await loadPhotoAsset(photo.internalId, "original", { includeTrashed: photoListMode === "trashed" });
   if (file?.blob) {
     detailUrl = URL.createObjectURL(file.blob);
     elements["detail-image"].src = detailUrl;
@@ -493,7 +571,164 @@ async function showPhotoDetail(photo) {
     detailGroup("台帳情報", [["タイトル", photo.ledger.title], ["説明文", photo.ledger.description], ["手動編集", photo.ledger.manual ? "はい" : "いいえ"]]),
     detailGroup("ファイル情報", [["保存元", photo.sources?.includes("cloud") ? "端末／クラウド" : "端末"], ["photoUid", photo.photoUid], ["SHA-256", photo.sha256], ["画像サイズ", `${photo.width} × ${photo.height}px`], ["ファイル容量", `${photo.bytes.toLocaleString("ja-JP")} bytes`]])
   );
+  elements["detail-delete-photo"].hidden = photoListMode === "trashed";
+  elements["detail-restore-photo"].hidden = photoListMode !== "trashed";
   elements["photo-detail"].showModal();
+}
+
+async function buildPhotoDeleteDialogPreview(photoInternalIds) {
+  const preview = await getPhotoDeletionPreview(photoInternalIds);
+  const context = photoLifecycleContext();
+  const cloudPhotos = preview.photos.filter(photo => ["cloud", "mixed"].includes(photoSourceKind(photo)));
+  const remoteReferences = [];
+  if (cloudPhotos.length) {
+    if (context.mode !== "cloud" || context.identity?.role !== "admin") {
+      preview.reasons.push("共有写真の削除は管理者だけが操作できます。");
+    } else if (cloudPhotos.some(photo => !photo.cloud?.remotePhotoId || !photo.cloud?.revision)) {
+      preview.reasons.push("共有写真の識別情報を確認できません。最新情報を取得してから再試行してください。");
+    } else {
+      for (const photo of cloudPhotos) {
+        const references = await context.provider.photoLedgerReferences(photo.cloud.remotePhotoId);
+        remoteReferences.push(...references.map(reference => ({
+          photoId: photo.internalId,
+          ledgerId: reference.ledger_id,
+          ledgerTitle: reference.ledger_title,
+          pageIndex: Number(reference.page_index),
+          slotIndex: Number(reference.slot_index),
+          remote: true
+        })));
+      }
+    }
+  }
+  preview.ledgerReferences = [...preview.ledgerReferences, ...remoteReferences];
+  if (remoteReferences.length) preview.reasons.push(`共有台帳で使用中の写真が${new Set(remoteReferences.map(ref => ref.photoId)).size}枚あります。`);
+  preview.eligible = preview.reasons.length === 0;
+  return preview;
+}
+
+function renderPhotoDeleteDialog(preview) {
+  photoDeletionPreview = preview;
+  const phrase = photoDeleteConfirmation(preview.photoCount);
+  const sharedCount = preview.cloudCount + preview.mixedCount;
+  elements["photo-delete-count"].textContent = `${preview.photoCount}枚`;
+  elements["photo-delete-zip-count"].textContent = `${preview.zipCount}枚`;
+  elements["photo-delete-cloud-count"].textContent = `${sharedCount}枚`;
+  elements["photo-delete-ledger-count"].textContent = `${new Set(preview.ledgerReferences.map(ref => ref.photoId)).size}枚`;
+  elements["photo-delete-bytes"].textContent = `約${formatBytes(preview.estimatedBytes)}`;
+  elements["photo-delete-phrase"].textContent = phrase;
+  elements["photo-delete-confirm-text"].value = "";
+  elements["photo-delete-error"].hidden = preview.reasons.length === 0;
+  elements["photo-delete-error"].textContent = preview.reasons.join(" ");
+  elements["photo-delete-ledger-references"].hidden = preview.ledgerReferences.length === 0;
+  elements["photo-delete-ledger-list"].replaceChildren(...preview.ledgerReferences.map(reference => {
+    const item = document.createElement("li");
+    item.append(document.createTextNode(`${reference.ledgerTitle} / ${reference.pageIndex + 1}頁 / ${reference.slotIndex + 1}枠 `));
+    if (!reference.remote) {
+      const open = document.createElement("button");
+      open.type = "button";
+      open.className = "secondary";
+      open.textContent = "台帳を開く";
+      open.addEventListener("click", () => {
+        localStorage.setItem("aoALB:selectedLedgerId", reference.ledgerId);
+        elements["photo-delete-dialog"].close();
+        showView("ledgers");
+      });
+      item.append(open);
+    }
+    return item;
+  }));
+  if (preview.kind === "zip") {
+    elements["photo-delete-explanation"].textContent = "この端末に保存されている写真情報とJPEGを削除します。共有先への通信は行いません。";
+    elements["photo-delete-warning"].textContent = "削除後は元のZIPから再取込みできます。aoPICや別の工事は変更されません。";
+  } else {
+    elements["photo-delete-explanation"].textContent = "共有写真をごみ箱へ移動します。この端末の元データやaoPICの写真は変更しません。";
+    elements["photo-delete-warning"].textContent = "写真本体と一覧画像は共有先に保持され、管理者が「削除済み」から復元できます。完全削除は今回実行しません。";
+  }
+  elements["photo-delete-submit"].disabled = true;
+}
+
+async function openPhotoDeleteDialog(photoInternalIds) {
+  if (deletingPhotos) return;
+  setPhotoActionMessage();
+  try {
+    const preview = await buildPhotoDeleteDialogPreview(photoInternalIds);
+    renderPhotoDeleteDialog(preview);
+    elements["photo-delete-dialog"].showModal();
+    elements["photo-delete-confirm-text"].focus();
+  } catch (error) {
+    setPhotoActionMessage(error?.message || "削除内容を確認できませんでした。", true);
+  }
+}
+
+async function confirmPhotoDeletion(event) {
+  event.preventDefault();
+  if (deletingPhotos || !photoDeletionPreview?.eligible) return;
+  const phrase = photoDeleteConfirmation(photoDeletionPreview.photoCount);
+  if (elements["photo-delete-confirm-text"].value !== phrase) return;
+  deletingPhotos = true;
+  for (const id of ["photo-delete-submit", "photo-delete-cancel", "photo-delete-close"]) elements[id].disabled = true;
+  elements["photo-delete-progress"].hidden = false;
+  elements["photo-delete-error"].hidden = true;
+  try {
+    const deletedCount = photoDeletionPreview.photoCount;
+    if (photoDeletionPreview.kind === "zip") {
+      await deleteLocalPhotos(
+        photoDeletionPreview.photos.map(photo => photo.internalId),
+        photoDeletionPreview.versionToken
+      );
+    } else {
+      const context = photoLifecycleContext();
+      if (context.identity?.role !== "admin" || !context.provider) throw new Error("共有写真の削除は管理者だけが操作できます。");
+      await context.provider.trashPhotos(photoDeletionPreview.photos.map(photo => ({
+        remotePhotoId: photo.cloud.remotePhotoId,
+        revision: photo.cloud.revision
+      })));
+      await sharingController.refreshCloudPhotos();
+      await syncCloudTrash();
+    }
+    if (elements["photo-detail"].open) elements["photo-detail"].close();
+    selectedPhotoIds.clear();
+    photoSelectionMode = false;
+    elements["photo-delete-dialog"].close();
+    setPhotoActionMessage(`${deletedCount}枚の削除処理が完了しました。`);
+    photoDeletionPreview = null;
+    await renderPhotoView();
+    window.dispatchEvent(new CustomEvent("aoalb:photos-deleted"));
+  } catch (error) {
+    elements["photo-delete-error"].textContent = error?.message || "写真を削除できませんでした。データは勝手に除外していません。";
+    elements["photo-delete-error"].hidden = false;
+  } finally {
+    deletingPhotos = false;
+    for (const id of ["photo-delete-cancel", "photo-delete-close"]) elements[id].disabled = false;
+    elements["photo-delete-progress"].hidden = true;
+    const preview = photoDeletionPreview;
+    elements["photo-delete-submit"].disabled = !preview?.eligible
+      || elements["photo-delete-confirm-text"].value !== photoDeleteConfirmation(preview.photoCount);
+  }
+}
+
+async function restoreCurrentPhoto() {
+  if (!currentDetailPhoto || deletingPhotos) return;
+  const context = photoLifecycleContext();
+  if (context.identity?.role !== "admin" || !context.provider) {
+    setPhotoActionMessage("共有写真の復元は管理者だけが操作できます。", true);
+    return;
+  }
+  deletingPhotos = true;
+  elements["detail-restore-photo"].disabled = true;
+  try {
+    await context.provider.restorePhoto(currentDetailPhoto.cloud.remotePhotoId, currentDetailPhoto.cloud.revision);
+    elements["photo-detail"].close();
+    await sharingController.refreshCloudPhotos();
+    await syncCloudTrash();
+    await renderPhotoView();
+    setPhotoActionMessage("写真を共有一覧へ復元しました。台帳への配置は自動では戻りません。");
+  } catch (error) {
+    setPhotoActionMessage(error?.message || "写真を復元できませんでした。", true);
+  } finally {
+    deletingPhotos = false;
+    elements["detail-restore-photo"].disabled = false;
+  }
 }
 
 async function renderHistory() {
@@ -533,8 +768,66 @@ elements["clear-filters"].addEventListener("click", () => {
   elements["photo-sort"].value = "captured-asc";
   renderPhotoCards();
 });
+elements["photo-select-mode"].addEventListener("click", () => {
+  photoSelectionMode = !photoSelectionMode;
+  if (!photoSelectionMode) selectedPhotoIds.clear();
+  renderPhotoCards();
+});
+elements["photo-select-all"].addEventListener("click", () => {
+  for (const photo of filteredPhotos()) selectedPhotoIds.add(photo.internalId);
+  renderPhotoCards();
+});
+elements["photo-select-clear"].addEventListener("click", () => {
+  selectedPhotoIds.clear();
+  renderPhotoCards();
+});
+elements["photo-delete-selected"].addEventListener("click", () => openPhotoDeleteDialog([...selectedPhotoIds]));
+elements["show-active-photos"].addEventListener("click", async () => {
+  photoListMode = "active";
+  selectedPhotoIds.clear();
+  photoSelectionMode = false;
+  await renderPhotoView();
+});
+elements["show-trashed-photos"].addEventListener("click", async () => {
+  photoListMode = "trashed";
+  selectedPhotoIds.clear();
+  photoSelectionMode = false;
+  await renderPhotoView();
+});
 elements["close-detail"].addEventListener("click", () => elements["photo-detail"].close());
-elements["photo-detail"].addEventListener("close", () => { if (detailUrl) URL.revokeObjectURL(detailUrl); detailUrl = null; elements["detail-image"].removeAttribute("src"); });
+elements["detail-delete-photo"].addEventListener("click", () => {
+  const photoInternalId = currentDetailPhoto?.internalId;
+  if (!photoInternalId) return;
+  elements["photo-detail"].close();
+  openPhotoDeleteDialog([photoInternalId]);
+});
+elements["detail-restore-photo"].addEventListener("click", restoreCurrentPhoto);
+elements["photo-detail"].addEventListener("close", () => {
+  if (detailUrl) URL.revokeObjectURL(detailUrl);
+  detailUrl = null;
+  currentDetailPhoto = null;
+  elements["detail-image"].removeAttribute("src");
+});
+elements["photo-delete-form"].addEventListener("submit", confirmPhotoDeletion);
+elements["photo-delete-confirm-text"].addEventListener("input", () => {
+  const preview = photoDeletionPreview;
+  elements["photo-delete-submit"].disabled = deletingPhotos || !preview?.eligible
+    || elements["photo-delete-confirm-text"].value !== photoDeleteConfirmation(preview.photoCount);
+});
+for (const id of ["photo-delete-cancel", "photo-delete-close"]) {
+  elements[id].addEventListener("click", () => {
+    if (!deletingPhotos) elements["photo-delete-dialog"].close();
+  });
+}
+elements["photo-delete-dialog"].addEventListener("cancel", event => {
+  if (deletingPhotos) event.preventDefault();
+});
+elements["photo-delete-dialog"].addEventListener("close", () => {
+  if (!deletingPhotos) {
+    photoDeletionPreview = null;
+    elements["photo-delete-confirm-text"].value = "";
+  }
+});
 elements["project-delete-form"].addEventListener("submit", confirmProjectDeletion);
 elements["project-delete-confirm-name"].addEventListener("input", () => {
   const preview = projectDeletionPreview;

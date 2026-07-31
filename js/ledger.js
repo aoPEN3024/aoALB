@@ -1,7 +1,8 @@
 import {
-  getProjects, getPhotosByProjectUid, getPhotoFile,
+  getProjects, getPhotosByProjectUid,
   getLedgersByProjectId, getLedger, saveLedger
 } from "./storage.js";
+import { loadPhotoAsset } from "./cloud/receiver.js";
 import {
   PRINT_TEMPLATE, automaticCaptionFields, renderLedgerPages,
   validateLedgerPages, printLedger
@@ -11,6 +12,7 @@ export const LEDGER_SCHEMA_VERSION = 2;
 export const blankSlot = () => ({ type: "blank" });
 export const CAPTION_LIMITS = Object.freeze({ koushu: 200, sokuten: 200, text: 1000 });
 export const LEDGER_VIEW_KEY = "aoALB:ledgerViewMode";
+export const LEDGER_SELECT_KEY = "aoALB:selectedLedgerId";
 
 const clone = value => structuredClone(value);
 
@@ -63,6 +65,7 @@ export function normalizeLedger(value) {
     schemaVersion: LEDGER_SCHEMA_VERSION,
     projectId: value?.projectId || "",
     title: String(value?.title || "施工状況写真"),
+    coverKoushu: String(value?.coverKoushu || ""),
     template: PRINT_TEMPLATE,
     showCover: value?.showCover !== false,
     captionOverrides: normalizeCaptionOverrides(value?.captionOverrides),
@@ -385,7 +388,7 @@ export function initLedgerEditor() {
         if (!entry.isIntersecting) continue;
         const image = entry.target;
         libraryObserver.unobserve(image);
-        getPhotoFile(image.dataset.photoId).then(file => {
+        loadPhotoAsset(image.dataset.photoId, "thumbnail").then(file => {
           if (!file?.blob || !image.isConnected) return;
           const url = URL.createObjectURL(file.blob);
           libraryUrls.add(url);
@@ -444,19 +447,23 @@ export function initLedgerEditor() {
       ui.print.disabled = false;
       return;
     }
-    ui.warnings.append(element("strong", "", "最小文字サイズでも枠内に収まらない項目があります。文字を短くしてください。"));
+    ui.warnings.append(element("strong", "", result.issues.some(issue => issue.asset)
+      ? "印刷に必要な原寸写真がありません。オンラインで取得してから再度確認してください。"
+      : "最小文字サイズでも枠内に収まらない項目があります。文字を短くしてください。"));
     const list = document.createElement("ul");
     for (const issue of result.issues) {
-      const fields = issue.fields.map(field => `${field.label}（${field.count}文字）`).join("、");
+      const fields = issue.fields.map(field => issue.asset ? field.label : `${field.label}（${field.count}文字）`).join("、");
       const item = element("li");
       if (issue.kind === "cover") {
         item.append(document.createTextNode(`表紙: ${fields}`));
       } else {
         item.append(document.createTextNode(`写真枠${issue.index + 1}: ${fields} `));
-        const edit = element("button", "ledger-warning-edit", "文言を編集");
-        edit.type = "button";
-        edit.addEventListener("click", () => openCaptionEditor(issue.index));
-        item.append(edit);
+        if (!issue.asset) {
+          const edit = element("button", "ledger-warning-edit", "文言を編集");
+          edit.type = "button";
+          edit.addEventListener("click", () => openCaptionEditor(issue.index));
+          item.append(edit);
+        }
       }
       list.append(item);
     }
@@ -513,6 +520,23 @@ export function initLedgerEditor() {
         event.dataTransfer.setData("application/x-aoalb-slot", String(index));
         event.dataTransfer.effectAllowed = "move";
       });
+      slot.addEventListener("dblclick", event => {
+        if (event.target.closest("button")) return;
+        const slotData = flattenSlots(currentLedger)[index];
+        if (slotData?.type === "photo") openCaptionEditor(index);
+      });
+    }
+    for (const field of ui.pages.querySelectorAll('[data-ledger-cover-field="koushu"]')) {
+      field.contentEditable = "true";
+      field.spellcheck = false;
+      field.title = "ダブルクリックで工種を編集（空にすると自動反映に戻ります）";
+      field.addEventListener("blur", () => {
+        const text = field.textContent.trim();
+        mutate(ledger => { ledger.coverKoushu = text; return ledger; });
+      });
+      field.addEventListener("keydown", event => {
+        if (event.key === "Enter") { event.preventDefault(); field.blur(); }
+      });
     }
   }
 
@@ -544,7 +568,8 @@ export function initLedgerEditor() {
     }
     ui.guide.hidden = true;
     const rendered = await renderLedgerPages(ui.pages, {
-      ledger: currentLedger, project: currentProject, photos, loadPhotoFile: getPhotoFile,
+      ledger: currentLedger, project: currentProject, photos,
+      loadPhotoFile: photoId => loadPhotoAsset(photoId, "original", { network: "wifi_only" }),
       interactive: true, selectedSlotIndex
     });
     previewUrls = rendered.objectUrls;
@@ -619,7 +644,7 @@ export function initLedgerEditor() {
     startPreviewObserver();
     projects = await getProjects();
     renderProjectOptions(preferredProjectUid);
-    await loadProject(selectedProjectUid());
+    await loadProject(selectedProjectUid(), localStorage.getItem(LEDGER_SELECT_KEY) || "");
   }
 
   function deactivate() {
@@ -637,6 +662,8 @@ export function initLedgerEditor() {
     loadProject(projectUid);
   });
   ui.select.addEventListener("change", async () => {
+    if (ui.select.value) localStorage.setItem(LEDGER_SELECT_KEY, ui.select.value);
+    else localStorage.removeItem(LEDGER_SELECT_KEY);
     currentLedger = ui.select.value ? normalizeLedger(await getLedger(ui.select.value)) : null;
     selectedPhotoId = "";
     selectedSlotIndex = -1;

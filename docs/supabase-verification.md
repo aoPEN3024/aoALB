@@ -1,0 +1,52 @@
+# Supabase実環境のセキュリティ検証
+
+`supabase/verification/202607190003_security_verification.sql`は、基盤と初期現場を検査します。テスト用の工事・写真メタデータをトランザクション内だけに作り、最後に`ROLLBACK`します。JPEGはアップロードしません。
+
+## SQLで自動確認する内容
+
+- pgcrypto、全テーブル、RLS、Storage bucket・policy、Realtime登録
+- すべてのSECURITY DEFINER関数の固定`search_path`
+- PUBLIC・anonへ不要な関数実行権限がないこと
+- 永続的なbootstrap関数がないこと
+- admin、viewer、editor、未所属ユーザーの現場・工事・写真・台帳・同期イベントに対するRLS挙動
+- viewerの更新・削除・管理RPC拒否と、editorの追加・更新・削除・管理RPCの権限分離
+- adminが別現場を参照できず、参加コードからadmin権限を付与できないこと
+- 未所属ユーザーから見える現場・工事・写真・台帳・同期イベントが0件であること
+- 現場IDを変えても5回で参加試行がブロックされること
+- siteIdをまたぐ複合外部キー不整合とStorageパス不整合の拒否
+
+結果一覧の全行が`passed = true`であることを確認します。エラーまたはfalseが1件でもあれば、実写真の同期、Pages公開、PRのマージを停止します。
+
+## Dashboardで追加確認する内容
+
+1. **Authentication > Users**: 初期管理者UUIDと匿名ユーザーであること
+2. **Table Editor**: `site_join_codes`に平文参加コードがなく、`grant_role`がeditorまたはviewerであること
+3. **Storage > Buckets > site-photos**: Private、20MB、image/jpegのみ
+4. **Database > Replication**: sync_eventsがRealtime対象であること
+5. **Database > Policies**: 業務テーブルとstorage.objectsのpolicyが有効であること
+
+## 2端末相当の手動確認
+
+- 別ブラウザプロファイルで匿名Auth UUIDが異なる
+- 初期管理者と参加端末が同じ現場へ参加できる
+- 無効化した端末が参加コードを再入力しても復帰できない
+- 誤った現場ID・参加コードは同じ一般エラーになり、5回目から15分停止する
+- viewerは読取のみ、editorは追加・更新、adminだけが削除・管理操作を行える
+- 現場Aの端末は現場BのUUIDやStorageパスへアクセスできない
+- テストイベントの再送で同じeventIdが二重登録されない
+- オフライン時はpending、復帰後はsyncedになる
+
+実写真と台帳同期は、このSQL検証と手動確認がすべて通った後の別段階です。
+
+## aoCLOUD実環境検証結果（2026-07-19）
+
+- 基盤migrationと初期bootstrapを空のプロジェクトへ適用できた。
+- 12テーブル、全テーブルRLS、業務31件＋Storage 4件のpolicy、非公開`site-photos`、Realtime対象`sync_events`を確認した。
+- ブラウザ用RPCは4件だけが`authenticated`へ許可され、不要なPUBLIC EXECUTEと永続bootstrap関数がないことを確認した。
+- 38件のSQL検証が全件成功した。admin・editor・viewer・未所属、現場分離、複合外部キー、Storageメタデータ、Realtime行分離を含む。
+- 実ブラウザで匿名認証、正しいコードでのeditor参加、viewer更新拒否、editor送信、管理者による端末無効化、同一現場Realtime受信を確認した。
+- 誤った参加コードを現場IDを変えて5回試行すると15分停止され、正しい現場IDとコードへ戻しても停止を回避できないことを確認した。
+- 実写真はアップロードしていない。Storageは非公開設定、policy、パス制約、メタデータRLSを検証した。
+- 検証用匿名ユーザー2件、同期イベント2件、参加試行1件、関連監査ログ3件を承認後に削除した。初期現場`AOYAMA_TEST`と管理端末だけを残した。
+
+実ブラウザ参加時に`join_site`の`site_id`が出力列と競合する不具合を検出した。`ON CONFLICT ON CONSTRAINT site_members_site_id_user_id_key`へ修正し、既適用環境向けに`202607190004_fix_join_site_ambiguity.sql`を追加して再検証済みである。

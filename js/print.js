@@ -100,6 +100,9 @@ async function createSlot(slot, slotIndex, photosById, loadPhotoFile, objectUrls
       const url = URL.createObjectURL(file.blob);
       objectUrls.add(url);
       image.src = url;
+    } else {
+      wrapper.dataset.imageMissing = "true";
+      image.alt = "原寸写真はオンライン時に取得してください";
     }
     imageCell.append(image);
   } else {
@@ -114,7 +117,7 @@ async function createSlot(slot, slotIndex, photosById, loadPhotoFile, objectUrls
 function createCover(ledger, project) {
   const cover = element("section", "ledger-page ledger-cover");
   cover.dataset.pageType = "cover";
-  const firstKoushu = ledger._coverKoushu || "";
+  const firstKoushu = (ledger.coverKoushu && ledger.coverKoushu.trim()) ? ledger.coverKoushu : (ledger._coverKoushu || "");
   const fields = [
     ["title", "ledger-cover-title", ledger.title || "施工状況写真"],
     ["koushu", "ledger-cover-koushu", firstKoushu],
@@ -228,6 +231,12 @@ export async function validateLedgerPages(container, photos, ledger = null) {
     slot.classList.remove("ledger-unfit");
     if (!image) continue;
     photoCount += 1;
+    if (slot.dataset.imageMissing === "true" || !image.getAttribute("src")) {
+      slot.classList.add("ledger-unfit");
+      const photo = photosById.get(slot.dataset.photoId) || {};
+      issues.push({ kind: "photo", index, photo, asset: true, fields: [{ label: "原寸写真（オンライン時に取得）", count: 0 }] });
+      continue;
+    }
     let fits = false;
     for (const size of LEDGER_FONT_SIZES) {
       caption.style.setProperty("--ledger-font-size", `${size}pt`);

@@ -5,3 +5,6 @@
 Thumbs.db
 work/
 test-data/
+.env
+.env.*
+config/cloud.local.json

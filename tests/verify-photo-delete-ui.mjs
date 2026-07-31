@@ -29,6 +29,8 @@ assert.match(provider, /rpc\("restore_photo"/);
 assert.match(provider, /rpc\("photo_ledger_references"/);
 assert.match(provider, /eq\("lifecycle_status", "active"\)/);
 assert.match(storage, /db\.transaction\(PHOTO_DELETE_STORES, "readwrite"\)/);
+assert.match(app, /selectedBytes/);
+assert.match(app, /選択中 \$\{selected\}件・約\$\{formatBytes\(selectedBytes\)\}/);
 assert.doesNotMatch(app + provider + storage, /service_role|database password|secret key/i);
 
 console.log("photo deletion UI static verification: OK");

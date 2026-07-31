@@ -6,7 +6,7 @@ import {
   getPhotoDeletionPreview, deleteLocalPhotos
 } from "./storage.js";
 import { initLedgerEditor } from "./ledger.js";
-import { initSiteSharing } from "./sharing.js?v=20260731-photo-delete1";
+import { initSiteSharing } from "./sharing.js?v=20260731-photo-delete2";
 import { loadPhotoAsset, syncCloudTrash } from "./cloud/receiver.js";
 import { photoDeleteConfirmation, photoSourceKind } from "./photo-delete.js";
 
@@ -515,8 +515,12 @@ async function renderPhotoView() {
 
 function renderPhotoSelectionState() {
   const selected = selectedPhotoIds.size;
+  const selectedBytes = allPhotos.reduce(
+    (total, photo) => selectedPhotoIds.has(photo.internalId) ? total + Math.max(0, Number(photo.bytes) || 0) : total,
+    0
+  );
   elements["photo-selected-count"].hidden = !photoSelectionMode;
-  elements["photo-selected-count"].textContent = `選択中 ${selected}件`;
+  elements["photo-selected-count"].textContent = `選択中 ${selected}件・約${formatBytes(selectedBytes)}`;
   elements["photo-select-all"].hidden = !photoSelectionMode;
   elements["photo-select-clear"].hidden = !photoSelectionMode;
   elements["photo-delete-selected"].hidden = !photoSelectionMode;

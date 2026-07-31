@@ -24,6 +24,7 @@ for (const rpc of [
   "photo_ledger_references",
   "check_photo_upload_state",
   "trash_photo",
+  "trash_photos",
   "restore_photo"
 ]) {
   assert.match(migration, new RegExp(`create function public\\.${rpc}\\b`));
@@ -33,7 +34,7 @@ for (const rpc of [
 
 assert.equal(
   (migration.match(/security definer\s+set search_path = ''/g) || []).length,
-  4,
+  5,
   "Every public lifecycle RPC must fix search_path"
 );
 assert.match(migration, /private\.has_site_role\(v_photo\.site_id, 'admin'\)/);

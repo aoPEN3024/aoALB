@@ -200,6 +200,103 @@ begin
 end;
 $$;
 
+create function public.trash_photos(
+  p_photo_ids uuid[],
+  p_expected_revisions bigint[]
+)
+returns setof public.photos
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_count integer;
+  v_distinct_count integer;
+  v_photo public.photos%rowtype;
+  v_index integer;
+begin
+  v_count := coalesce(pg_catalog.array_length(p_photo_ids, 1), 0);
+  if v_count = 0
+     or v_count > 200
+     or v_count <> coalesce(pg_catalog.array_length(p_expected_revisions, 1), 0) then
+    raise exception 'invalid_photo_batch';
+  end if;
+  select count(distinct value) into v_distinct_count
+  from pg_catalog.unnest(p_photo_ids) as value;
+  if v_distinct_count <> v_count then
+    raise exception 'duplicate_photo_id';
+  end if;
+
+  -- Lock in a stable order so concurrent administrators cannot deadlock.
+  perform p.id
+  from public.photos p
+  where p.id = any(p_photo_ids)
+  order by p.id
+  for update;
+  if not found or (
+    select count(*) from public.photos p where p.id = any(p_photo_ids)
+  ) <> v_count then
+    raise exception 'not_allowed';
+  end if;
+
+  for v_index in 1..v_count loop
+    select * into v_photo
+    from public.photos
+    where id = p_photo_ids[v_index];
+
+    if not private.has_site_role(v_photo.site_id, 'admin') then
+      raise exception 'not_allowed';
+    end if;
+    if not private.site_is_active(v_photo.site_id) then
+      raise exception 'site_not_active';
+    end if;
+    if v_photo.revision <> p_expected_revisions[v_index] then
+      raise exception 'revision_conflict';
+    end if;
+    if v_photo.lifecycle_status <> 'active' then
+      raise exception 'photo_state_invalid';
+    end if;
+    if exists (
+      select 1 from public.ledger_slots
+      where photo_id = v_photo.id and site_id = v_photo.site_id
+    ) then
+      raise exception 'photo_used_by_ledger';
+    end if;
+  end loop;
+
+  for v_index in 1..v_count loop
+    update public.photos
+    set lifecycle_status = 'trashed',
+        trashed_at = now(),
+        trashed_by = auth.uid(),
+        trash_revision = revision + 1,
+        delete_error = null
+    where id = p_photo_ids[v_index]
+    returning * into v_photo;
+
+    insert into public.audit_logs(
+      site_id, actor_user_id, action, entity_type, entity_id, details
+    )
+    values (
+      v_photo.site_id, auth.uid(), 'photo.trash', 'photo', v_photo.id,
+      pg_catalog.jsonb_build_object('photo_uid', v_photo.photo_uid)
+    );
+    insert into public.sync_events(
+      event_id, site_id, entity_type, entity_id, event_type, payload
+    )
+    values (
+      pg_catalog.gen_random_uuid(), v_photo.site_id, 'photo', v_photo.id,
+      'photo_trashed',
+      pg_catalog.jsonb_build_object(
+        'photoUid', v_photo.photo_uid,
+        'revision', v_photo.revision
+      )
+    );
+    return next v_photo;
+  end loop;
+end;
+$$;
+
 create function public.restore_photo(
   p_photo_id uuid,
   p_expected_revision bigint
@@ -271,12 +368,15 @@ revoke all on function public.check_photo_upload_state(uuid, uuid, text)
 from public, anon, authenticated;
 revoke all on function public.trash_photo(uuid, bigint)
 from public, anon, authenticated;
+revoke all on function public.trash_photos(uuid[], bigint[])
+from public, anon, authenticated;
 revoke all on function public.restore_photo(uuid, bigint)
 from public, anon, authenticated;
 
 grant execute on function public.photo_ledger_references(uuid) to authenticated;
 grant execute on function public.check_photo_upload_state(uuid, uuid, text) to authenticated;
 grant execute on function public.trash_photo(uuid, bigint) to authenticated;
+grant execute on function public.trash_photos(uuid[], bigint[]) to authenticated;
 grant execute on function public.restore_photo(uuid, bigint) to authenticated;
 
 -- Lifecycle columns are changed only through the revision-checked RPCs.

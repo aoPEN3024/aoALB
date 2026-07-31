@@ -17,6 +17,8 @@ select
     as check_photo_upload_state_exists,
   pg_catalog.to_regprocedure('public.trash_photo(uuid,bigint)') is not null
     as trash_photo_exists,
+  pg_catalog.to_regprocedure('public.trash_photos(uuid[],bigint[])') is not null
+    as trash_photos_exists,
   pg_catalog.to_regprocedure('public.restore_photo(uuid,bigint)') is not null
     as restore_photo_exists;
 
@@ -27,6 +29,7 @@ where routine_schema = 'public'
     'photo_ledger_references',
     'check_photo_upload_state',
     'trash_photo',
+    'trash_photos',
     'restore_photo'
   )
 order by routine_name;
@@ -38,6 +41,7 @@ where specific_schema = 'public'
     'photo_ledger_references',
     'check_photo_upload_state',
     'trash_photo',
+    'trash_photos',
     'restore_photo'
   )
 order by routine_name, grantee;

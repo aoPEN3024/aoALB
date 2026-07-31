@@ -28,6 +28,7 @@ revoke update on public.photos from authenticated;
 grant update on public.photos to authenticated;
 
 drop function if exists public.restore_photo(uuid, bigint);
+drop function if exists public.trash_photos(uuid[], bigint[]);
 drop function if exists public.trash_photo(uuid, bigint);
 drop function if exists public.check_photo_upload_state(uuid, uuid, text);
 drop function if exists public.photo_ledger_references(uuid);

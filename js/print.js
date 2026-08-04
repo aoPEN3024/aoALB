@@ -1,3 +1,5 @@
+import { effectiveClassification } from "./classification.js";
+
 export const PRINT_TEMPLATE = "construction-3";
 export const LEDGER_FONT_SIZES = Object.freeze([10.5, 10, 9.5, 9, 8.5, 8]);
 export const COVER_FONT_SIZES = Object.freeze({
@@ -22,7 +24,7 @@ function captionText(photo) {
 }
 
 export function automaticCaptionFields(photo) {
-  const classification = photo?.classification || {};
+  const classification = effectiveClassification(photo);
   return {
     koushu: String(classification.koushu || ""),
     sokuten: String(classification.sokuten || ""),
@@ -145,7 +147,7 @@ export async function renderLedgerPages(container, {
   const photosById = new Map(photos.map(photo => [photo.internalId, photo]));
   const firstPhotoSlot = ledger.pages.flatMap(page => page.slots).find(slot => slot.type === "photo");
   const firstPhoto = firstPhotoSlot ? photosById.get(firstPhotoSlot.photoId) : null;
-  const renderLedger = { ...ledger, _coverKoushu: firstPhoto?.classification?.koushu || "" };
+  const renderLedger = { ...ledger, _coverKoushu: firstPhoto ? effectiveClassification(firstPhoto).koushu : "" };
   const nodes = [];
   if (ledger.showCover) nodes.push(createPageFrame(createCover(renderLedger, project)));
   let flatIndex = 0;

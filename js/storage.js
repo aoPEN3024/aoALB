@@ -202,6 +202,49 @@ export async function getPhotoByInternalId(photoInternalId) {
   return requestResult(tx.objectStore("photos").get(photoInternalId));
 }
 
+export async function updatePhotoClassificationOverrides(photoInternalIds, changes, reset = false, resetFields = []) {
+  const ids = [...new Set((photoInternalIds || []).map(String).filter(Boolean))];
+  if (!ids.length) throw new Error("分類を変更する写真を選択してください。");
+  const allowed = new Set(["koushu", "shubetsu", "saibetsu", "sokuten", "tekiyo"]);
+  const entries = Object.entries(changes || {}).filter(([field]) => allowed.has(field));
+  const fieldsToReset = [...new Set((resetFields || []).filter(field => allowed.has(field)))];
+  if (!reset && !entries.length && !fieldsToReset.length) throw new Error("変更する分類項目を選択してください。");
+  const db = await openDatabase();
+  const tx = db.transaction("photos", "readwrite");
+  const done = transactionDone(tx);
+  const store = tx.objectStore("photos");
+  try {
+    for (const id of ids) {
+      const photo = await requestResult(store.get(id));
+      if (!photo) throw new Error("選択した写真が見つかりません。再読み込みしてください。");
+      if (reset) {
+        delete photo.classificationOverride;
+        delete photo.classificationOverrideUpdatedAt;
+      } else {
+        const override = photo.classificationOverride && typeof photo.classificationOverride === "object"
+          ? { ...photo.classificationOverride }
+          : {};
+        for (const field of fieldsToReset) delete override[field];
+        for (const [field, value] of entries) override[field] = String(value ?? "");
+        if (Object.keys(override).length) {
+          photo.classificationOverride = override;
+          photo.classificationOverrideUpdatedAt = new Date().toISOString();
+        } else {
+          delete photo.classificationOverride;
+          delete photo.classificationOverrideUpdatedAt;
+        }
+      }
+      store.put(photo);
+    }
+    await done;
+    return ids.length;
+  } catch (error) {
+    try { tx.abort(); } catch (_) { /* already completed or aborted */ }
+    await done.catch(() => {});
+    throw error;
+  }
+}
+
 const PHOTO_DELETE_STORES = ["photos", "photoFiles", "cloudFiles", "ledgers", "settings"];
 
 async function readPhotoDeleteData(transaction) {

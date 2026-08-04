@@ -530,7 +530,7 @@ function renderPhotoSelectionState() {
   elements["photo-select-all"].hidden = !photoSelectionMode;
   elements["photo-select-clear"].hidden = !photoSelectionMode;
   elements["photo-classify-selected"].hidden = !photoSelectionMode;
-  elements["photo-classify-selected"].disabled = selected === 0 || savingClassification;
+  elements["photo-classify-selected"].disabled = selected === 0 || savingClassification || deletingPhotos;
   elements["photo-delete-selected"].hidden = !photoSelectionMode;
   elements["photo-delete-selected"].disabled = selected === 0 || deletingPhotos;
   elements["photo-select-mode"].textContent = photoSelectionMode ? "選択を終了" : "写真を選択";
@@ -581,12 +581,15 @@ async function showPhotoDetail(photo) {
   );
   elements["detail-delete-photo"].hidden = photoListMode === "trashed";
   elements["detail-restore-photo"].hidden = photoListMode !== "trashed";
+  elements["detail-edit-classification"].hidden = photoListMode !== "active";
+  elements["detail-edit-classification"].disabled = deletingPhotos || savingClassification;
   elements["photo-detail"].showModal();
 }
 
 const classificationLabels = { koushu: "工種", shubetsu: "種別", saibetsu: "細別", sokuten: "測点", tekiyo: "摘要" };
 
 function openClassificationEditor(photoInternalIds) {
+  if (deletingPhotos || photoListMode !== "active") return setPhotoActionMessage("削除処理中または削除済みの写真は分類変更できません。", true);
   const ids = [...new Set(photoInternalIds || [])];
   const targets = ids.map(id => allPhotos.find(photo => photo.internalId === id)).filter(Boolean);
   if (!targets.length) return setPhotoActionMessage("分類を変更する写真を選択してください。", true);
@@ -615,8 +618,35 @@ function openClassificationEditor(photoInternalIds) {
     input.value = values.every(value => value === values[0]) ? values[0] : "";
     input.placeholder = values.every(value => value === values[0]) ? "空欄にする場合は空のまま保存" : "複数の内容があります";
     input.disabled = !check.checked;
-    check.addEventListener("change", () => { input.disabled = !check.checked; });
-    row.append(check, label, input);
+    const inputRow = document.createElement("div");
+    inputRow.className = "classification-input-row";
+    const resetButton = document.createElement("button");
+    resetButton.type = "button";
+    resetButton.className = "secondary classification-field-reset";
+    resetButton.textContent = "この項目を元に戻す";
+    resetButton.addEventListener("click", () => {
+      const active = row.dataset.resetOriginal !== "true";
+      if (active) {
+        row.dataset.resetOriginal = "true";
+        check.checked = true;
+        input.disabled = true;
+        resetButton.textContent = "元に戻す指定済み";
+        resetButton.classList.add("active");
+      } else {
+        delete row.dataset.resetOriginal;
+        input.disabled = !check.checked;
+        resetButton.textContent = "この項目を元に戻す";
+        resetButton.classList.remove("active");
+      }
+    });
+    check.addEventListener("change", () => {
+      delete row.dataset.resetOriginal;
+      resetButton.textContent = "この項目を元に戻す";
+      resetButton.classList.remove("active");
+      input.disabled = !check.checked;
+    });
+    inputRow.append(input, resetButton);
+    row.append(check, label, inputRow);
     return row;
   });
   elements["classification-fields"].replaceChildren(...fields);
@@ -628,12 +658,14 @@ async function saveClassificationChanges(event) {
   event.preventDefault();
   if (savingClassification) return;
   const changes = {};
+  const resetFields = [];
   for (const field of CLASSIFICATION_FIELDS) {
     const row = elements["classification-fields"].querySelector(`[data-field="${field}"]`);
     if (!row?.querySelector("input[type=checkbox]")?.checked) continue;
-    changes[field] = row.querySelector(`[data-classification-input="${field}"]`).value.trim();
+    if (row.dataset.resetOriginal === "true") resetFields.push(field);
+    else changes[field] = row.querySelector(`[data-classification-input="${field}"]`).value.trim();
   }
-  if (!Object.keys(changes).length) {
+  if (!Object.keys(changes).length && !resetFields.length) {
     elements["classification-error"].textContent = "変更する項目を1つ以上選択してください。";
     elements["classification-error"].hidden = false;
     return;
@@ -641,7 +673,7 @@ async function saveClassificationChanges(event) {
   savingClassification = true;
   elements["classification-save"].disabled = true;
   try {
-    const count = await updatePhotoClassificationOverrides(classificationTargetIds, changes);
+    const count = await updatePhotoClassificationOverrides(classificationTargetIds, changes, false, resetFields);
     elements["classification-dialog"].close();
     if (elements["photo-detail"].open) elements["photo-detail"].close();
     selectedPhotoIds.clear();
@@ -657,26 +689,19 @@ async function saveClassificationChanges(event) {
   }
 }
 
-async function resetClassificationChanges() {
+function resetClassificationChanges() {
   if (savingClassification || !classificationTargetIds.length) return;
-  if (!confirm(`${classificationTargetIds.length}枚をaoPICから受け取った元の分類へ戻しますか？`)) return;
-  savingClassification = true;
-  elements["classification-save"].disabled = true;
-  try {
-    const count = await updatePhotoClassificationOverrides(classificationTargetIds, {}, true);
-    elements["classification-dialog"].close();
-    if (elements["photo-detail"].open) elements["photo-detail"].close();
-    selectedPhotoIds.clear();
-    photoSelectionMode = false;
-    await renderPhotoView();
-    setPhotoActionMessage(`${count}枚をaoPICの元分類へ戻しました。`);
-  } catch (error) {
-    elements["classification-error"].textContent = error?.message || "元の分類へ戻せませんでした。";
-    elements["classification-error"].hidden = false;
-  } finally {
-    savingClassification = false;
-    elements["classification-save"].disabled = false;
+  for (const row of elements["classification-fields"].querySelectorAll("[data-field]")) {
+    row.dataset.resetOriginal = "true";
+    const check = row.querySelector("input[type=checkbox]");
+    const input = row.querySelector("[data-classification-input]");
+    const button = row.querySelector(".classification-field-reset");
+    check.checked = true;
+    input.disabled = true;
+    button.textContent = "元に戻す指定済み";
+    button.classList.add("active");
   }
+  elements["classification-error"].hidden = true;
 }
 
 async function buildPhotoDeleteDialogPreview(photoInternalIds) {

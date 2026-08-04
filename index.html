@@ -10,7 +10,7 @@
   <link rel="icon" type="image/png" sizes="16x16" href="assets/brand/favicon-16-v1.png">
   <link rel="icon" type="image/png" sizes="32x32" href="assets/brand/favicon-32-v1.png">
   <link rel="apple-touch-icon" sizes="180x180" href="assets/brand/apple-touch-icon-v1.png">
-  <link rel="stylesheet" href="css/app.css?v=20260731-branding1">
+  <link rel="stylesheet" href="css/app.css?v=20260804-classification1">
   <link rel="stylesheet" href="css/print.css" media="print">
 </head>
 <body>
@@ -117,6 +117,7 @@
           <button id="photo-select-mode" type="button" class="secondary">写真を選択</button>
           <button id="photo-select-all" type="button" class="secondary" hidden>表示中をすべて選択</button>
           <button id="photo-select-clear" type="button" class="secondary" hidden>選択解除</button>
+          <button id="photo-classify-selected" type="button" class="primary" hidden disabled>選択した写真の分類を変更</button>
           <button id="photo-delete-selected" type="button" class="danger-outline" hidden disabled>選択した写真を削除</button>
         </div>
       </div>
@@ -360,9 +361,29 @@
       <div id="detail-fields" class="detail-fields"></div>
     </div>
     <div class="detail-actions">
+      <button id="detail-edit-classification" type="button" class="primary">分類を変更</button>
       <button id="detail-delete-photo" type="button" class="danger-outline">この写真を削除</button>
       <button id="detail-restore-photo" type="button" class="secondary" hidden>この写真を復元</button>
     </div>
+  </dialog>
+
+  <dialog id="classification-dialog" class="classification-dialog">
+    <form id="classification-form">
+      <div class="dialog-header"><h2>写真の分類を変更</h2><button id="classification-close" type="button" aria-label="閉じる">×</button></div>
+      <div class="classification-body">
+        <p id="classification-target"></p>
+        <p class="local-delete-notice">変更内容はこの端末のaoALBに保存します。aoPICの元情報、画像内の黒板、共有先の他端末は変更しません。</p>
+        <p id="classification-bulk-guide" class="limit-note" hidden>変更する項目にチェックを入れてください。チェックしない項目は現在の内容を維持します。</p>
+        <div id="classification-fields" class="classification-fields"></div>
+        <p id="classification-error" class="project-delete-error" role="alert" hidden></p>
+      </div>
+      <div class="classification-footer">
+        <button id="classification-reset" type="button" class="secondary">aoPICの元分類に戻す</button>
+        <span class="caption-editor-spacer"></span>
+        <button id="classification-cancel" type="button" class="secondary">キャンセル</button>
+        <button id="classification-save" type="submit" class="primary">保存</button>
+      </div>
+    </form>
   </dialog>
 
   <dialog id="photo-delete-dialog" class="photo-delete-dialog">
@@ -472,6 +493,6 @@
   </dialog>
 
   <script src="vendor/jszip.min.js"></script>
-  <script type="module" src="js/app.js?v=20260731-branding1"></script>
+  <script type="module" src="js/app.js?v=20260804-classification1"></script>
 </body>
 </html>

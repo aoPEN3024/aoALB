@@ -3,6 +3,7 @@ import {
   getLedgersByProjectId, getLedger, saveLedger
 } from "./storage.js";
 import { loadPhotoAsset } from "./cloud/receiver.js";
+import { effectiveClassification } from "./classification.js";
 import {
   PRINT_TEMPLATE, automaticCaptionFields, renderLedgerPages,
   validateLedgerPages, printLedger
@@ -335,7 +336,7 @@ export function initLedgerEditor() {
     const automatic = automaticCaptionFields(photo);
     const existing = currentLedger.captionOverrides?.[photo.internalId] || {};
     captionEditor = { slotIndex, photoId: photo.internalId, automatic, modes: {} };
-    ui.captionPhoto.textContent = `写真枠${slotIndex + 1}：${photo.ledger?.title || photo.classification?.saibetsu || "台帳文なし"}`;
+    ui.captionPhoto.textContent = `写真枠${slotIndex + 1}：${photo.ledger?.title || effectiveClassification(photo).saibetsu || "台帳文なし"}`;
     ui.captionError.hidden = true;
     for (const key of Object.keys(CAPTION_LIMITS)) {
       const overridden = Object.prototype.hasOwnProperty.call(existing, key) && existing[key] !== null;
@@ -360,7 +361,7 @@ export function initLedgerEditor() {
 
   function setupFilters() {
     for (const key of ["koushu", "shubetsu", "saibetsu", "sokuten"]) {
-      setOptions(ui.filters[key], photos.map(photo => photo.classification?.[key] || ""));
+      setOptions(ui.filters[key], photos.map(photo => effectiveClassification(photo)[key]));
     }
   }
 
@@ -370,7 +371,7 @@ export function initLedgerEditor() {
     const query = ui.filters.search.value.trim().toLocaleLowerCase("ja");
     return photos.filter(photo => {
       if (used.has(photo.internalId)) return false;
-      const classification = photo.classification || {};
+      const classification = effectiveClassification(photo);
       for (const key of ["koushu", "shubetsu", "saibetsu", "sokuten"]) {
         if (ui.filters[key].value && classification[key] !== ui.filters[key].value) return false;
       }
@@ -405,6 +406,7 @@ export function initLedgerEditor() {
     ui.unplacedCount.textContent = `${available.length}枚`;
     ui.mobileUnplaced.textContent = String(available.length);
     const cards = available.map(photo => {
+      const classification = effectiveClassification(photo);
       const card = element("button", `ledger-photo-card${selectedPhotoId === photo.internalId ? " selected" : ""}`);
       card.type = "button";
       card.draggable = true;
@@ -413,8 +415,8 @@ export function initLedgerEditor() {
       image.alt = "";
       image.dataset.photoId = photo.internalId;
       const info = element("span", "ledger-photo-card-info");
-      info.append(element("strong", "", photo.ledger?.title || photo.classification?.saibetsu || "台帳文なし"));
-      info.append(element("small", "", [photo.classification?.koushu, photo.classification?.sokuten].filter(Boolean).join(" / ") || "未分類"));
+      info.append(element("strong", "", photo.ledger?.title || classification.saibetsu || "台帳文なし"));
+      info.append(element("small", "", [classification.koushu, classification.sokuten].filter(Boolean).join(" / ") || "未分類"));
       card.append(image, info);
       card.addEventListener("click", () => {
         selectedPhotoId = selectedPhotoId === photo.internalId ? "" : photo.internalId;

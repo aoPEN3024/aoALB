@@ -3,12 +3,13 @@ import {
   openDatabase, getImportByExportId, getProjects, getImports, getPhotosByProjectUid,
   analyzeImportConflicts, estimateImportStorage, saveValidatedImport, recordFailedImport,
   getLocalProjectDeletionPreview, deleteLocalProjectData, getTrashedPhotosBySite,
-  getPhotoDeletionPreview, deleteLocalPhotos
+  getPhotoDeletionPreview, deleteLocalPhotos, updatePhotoClassificationOverrides
 } from "./storage.js";
 import { initLedgerEditor } from "./ledger.js";
 import { initSiteSharing } from "./sharing.js?v=20260731-photo-delete2";
 import { loadPhotoAsset, syncCloudTrash } from "./cloud/receiver.js";
 import { photoDeleteConfirmation, photoSourceKind } from "./photo-delete.js";
+import { CLASSIFICATION_FIELDS, effectiveClassification, hasClassificationOverride } from "./classification.js";
 
 const views = ["import", "projects", "photos", "ledgers", "history", "sharing"];
 const elements = Object.fromEntries(Array.from(document.querySelectorAll("[id]"), element => [element.id, element]));
@@ -30,6 +31,8 @@ let selectedPhotoIds = new Set();
 let currentDetailPhoto = null;
 let photoDeletionPreview = null;
 let deletingPhotos = false;
+let classificationTargetIds = [];
+let savingClassification = false;
 
 class StorageCapacityError extends Error {
   constructor(requiredBytes, availableBytes) {
@@ -373,10 +376,10 @@ function setSelectOptions(select, values) {
 }
 
 function setupFilterOptions() {
-  setSelectOptions(elements["filter-koushu"], allPhotos.map(photo => photo.classification.koushu));
-  setSelectOptions(elements["filter-shubetsu"], allPhotos.map(photo => photo.classification.shubetsu));
-  setSelectOptions(elements["filter-saibetsu"], allPhotos.map(photo => photo.classification.saibetsu));
-  setSelectOptions(elements["filter-sokuten"], allPhotos.map(photo => photo.classification.sokuten));
+  setSelectOptions(elements["filter-koushu"], allPhotos.map(photo => effectiveClassification(photo).koushu));
+  setSelectOptions(elements["filter-shubetsu"], allPhotos.map(photo => effectiveClassification(photo).shubetsu));
+  setSelectOptions(elements["filter-saibetsu"], allPhotos.map(photo => effectiveClassification(photo).saibetsu));
+  setSelectOptions(elements["filter-sokuten"], allPhotos.map(photo => effectiveClassification(photo).sokuten));
 }
 
 function filteredPhotos() {
@@ -389,10 +392,11 @@ function filteredPhotos() {
   const query = elements["filter-search"].value.trim().toLocaleLowerCase("ja");
   const unclassified = elements["filter-unclassified"].checked;
   const result = allPhotos.filter(photo => {
-    if (Object.entries(filters).some(([key, value]) => value && photo.classification[key] !== value)) return false;
-    if (unclassified && Object.values(photo.classification).some(value => value.trim())) return false;
+    const classification = effectiveClassification(photo);
+    if (Object.entries(filters).some(([key, value]) => value && classification[key] !== value)) return false;
+    if (unclassified && Object.values(classification).some(value => value.trim())) return false;
     if (query) {
-      const searchable = [...Object.values(photo.classification), photo.ledger.title, photo.ledger.description, photo.capturedAt].join(" ").toLocaleLowerCase("ja");
+      const searchable = [...Object.values(classification), photo.ledger.title, photo.ledger.description, photo.capturedAt].join(" ").toLocaleLowerCase("ja");
       if (!searchable.includes(query)) return false;
     }
     return true;
@@ -400,7 +404,7 @@ function filteredPhotos() {
   const sort = elements["photo-sort"].value;
   result.sort((a, b) => {
     if (sort === "captured-desc") return (b.capturedAt || "").localeCompare(a.capturedAt || "");
-    if (sort === "koushu") return (a.classification.koushu || "").localeCompare(b.classification.koushu || "", "ja") || (a.capturedAt || "").localeCompare(b.capturedAt || "");
+    if (sort === "koushu") return effectiveClassification(a).koushu.localeCompare(effectiveClassification(b).koushu, "ja") || (a.capturedAt || "").localeCompare(b.capturedAt || "");
     return (a.capturedAt || "").localeCompare(b.capturedAt || "");
   });
   return result;
@@ -414,6 +418,7 @@ function revokeThumbnailUrls() {
 }
 
 function createPhotoCard(photo) {
+  const classification = effectiveClassification(photo);
   const wrapper = document.createElement("div");
   wrapper.className = `photo-select-card${selectedPhotoIds.has(photo.internalId) ? " selected" : ""}`;
   const checkbox = document.createElement("input");
@@ -433,10 +438,11 @@ function createPhotoCard(photo) {
   const info = document.createElement("div");
   info.className = "photo-info";
   info.append(
-    textElement("h2", photo.ledger.title || photo.classification.saibetsu || "（台帳タイトルなし）"),
+    textElement("h2", photo.ledger.title || classification.saibetsu || "（台帳タイトルなし）"),
     textElement("p", formatDate(photo.capturedAt)),
-    textElement("p", [photo.classification.koushu, photo.classification.sokuten].filter(Boolean).join(" / ") || "未分類")
+    textElement("p", [classification.koushu, classification.sokuten].filter(Boolean).join(" / ") || "未分類")
   );
+  if (hasClassificationOverride(photo)) info.append(textElement("span", "この端末で分類変更済み", "status-badge success"));
   button.append(image, info);
   button.addEventListener("click", () => {
     if (photoSelectionMode && photoListMode === "active") {
@@ -523,6 +529,8 @@ function renderPhotoSelectionState() {
   elements["photo-selected-count"].textContent = `選択中 ${selected}件・約${formatBytes(selectedBytes)}`;
   elements["photo-select-all"].hidden = !photoSelectionMode;
   elements["photo-select-clear"].hidden = !photoSelectionMode;
+  elements["photo-classify-selected"].hidden = !photoSelectionMode;
+  elements["photo-classify-selected"].disabled = selected === 0 || savingClassification;
   elements["photo-delete-selected"].hidden = !photoSelectionMode;
   elements["photo-delete-selected"].disabled = selected === 0 || deletingPhotos;
   elements["photo-select-mode"].textContent = photoSelectionMode ? "選択を終了" : "写真を選択";
@@ -562,11 +570,11 @@ async function showPhotoDetail(photo) {
   } else {
     elements["detail-image"].alt = "原寸写真はオンライン時に取得できます";
   }
-  const c = photo.classification;
+  const c = effectiveClassification(photo);
   const b = photo.boardSnapshot;
   elements["detail-fields"].replaceChildren(
     detailGroup("工事", [["工事名", currentProject?.name], ["施工者", currentProject?.contractor], ["撮影日時", formatDate(photo.capturedAt)]]),
-    detailGroup("分類情報", [["工種", c.koushu], ["種別", c.shubetsu], ["細別", c.saibetsu], ["測点", c.sokuten], ["摘要", c.tekiyo]]),
+    detailGroup(hasClassificationOverride(photo) ? "分類情報（この端末で変更済み）" : "分類情報", [["工種", c.koushu], ["種別", c.shubetsu], ["細別", c.saibetsu], ["測点", c.sokuten], ["摘要", c.tekiyo]]),
     detailGroup("撮影時の黒板", [["工事名", b.koujimei], ["施工者", b.contractor], ["工種", b.koushu], ["種別", b.shubetsu], ["細別", b.saibetsu], ["測点", b.sokuten], ["摘要", b.tekiyo]]),
     detailGroup("台帳情報", [["タイトル", photo.ledger.title], ["説明文", photo.ledger.description], ["手動編集", photo.ledger.manual ? "はい" : "いいえ"]]),
     detailGroup("ファイル情報", [["保存元", photo.sources?.includes("cloud") ? "端末／クラウド" : "端末"], ["photoUid", photo.photoUid], ["SHA-256", photo.sha256], ["画像サイズ", `${photo.width} × ${photo.height}px`], ["ファイル容量", `${photo.bytes.toLocaleString("ja-JP")} bytes`]])
@@ -574,6 +582,101 @@ async function showPhotoDetail(photo) {
   elements["detail-delete-photo"].hidden = photoListMode === "trashed";
   elements["detail-restore-photo"].hidden = photoListMode !== "trashed";
   elements["photo-detail"].showModal();
+}
+
+const classificationLabels = { koushu: "工種", shubetsu: "種別", saibetsu: "細別", sokuten: "測点", tekiyo: "摘要" };
+
+function openClassificationEditor(photoInternalIds) {
+  const ids = [...new Set(photoInternalIds || [])];
+  const targets = ids.map(id => allPhotos.find(photo => photo.internalId === id)).filter(Boolean);
+  if (!targets.length) return setPhotoActionMessage("分類を変更する写真を選択してください。", true);
+  classificationTargetIds = targets.map(photo => photo.internalId);
+  const bulk = targets.length > 1;
+  elements["classification-target"].textContent = bulk ? `${targets.length}枚を一括変更します。` : `${formatDate(targets[0].capturedAt)}の写真`;
+  elements["classification-bulk-guide"].hidden = !bulk;
+  const fields = CLASSIFICATION_FIELDS.map(field => {
+    const row = document.createElement("div");
+    row.className = "classification-field";
+    row.dataset.field = field;
+    const check = document.createElement("input");
+    check.type = "checkbox";
+    check.id = `classification-change-${field}`;
+    check.checked = !bulk;
+    const label = document.createElement("label");
+    label.htmlFor = check.id;
+    label.textContent = `${classificationLabels[field]}を変更`;
+    const values = targets.map(photo => effectiveClassification(photo)[field]);
+    const input = field === "tekiyo" ? document.createElement("textarea") : document.createElement("input");
+    if (field !== "tekiyo") input.type = "text";
+    input.dataset.classificationInput = field;
+    input.setAttribute("aria-label", classificationLabels[field]);
+    input.maxLength = field === "tekiyo" ? 1000 : 200;
+    if (field === "tekiyo") input.rows = 3;
+    input.value = values.every(value => value === values[0]) ? values[0] : "";
+    input.placeholder = values.every(value => value === values[0]) ? "空欄にする場合は空のまま保存" : "複数の内容があります";
+    input.disabled = !check.checked;
+    check.addEventListener("change", () => { input.disabled = !check.checked; });
+    row.append(check, label, input);
+    return row;
+  });
+  elements["classification-fields"].replaceChildren(...fields);
+  elements["classification-error"].hidden = true;
+  elements["classification-dialog"].showModal();
+}
+
+async function saveClassificationChanges(event) {
+  event.preventDefault();
+  if (savingClassification) return;
+  const changes = {};
+  for (const field of CLASSIFICATION_FIELDS) {
+    const row = elements["classification-fields"].querySelector(`[data-field="${field}"]`);
+    if (!row?.querySelector("input[type=checkbox]")?.checked) continue;
+    changes[field] = row.querySelector(`[data-classification-input="${field}"]`).value.trim();
+  }
+  if (!Object.keys(changes).length) {
+    elements["classification-error"].textContent = "変更する項目を1つ以上選択してください。";
+    elements["classification-error"].hidden = false;
+    return;
+  }
+  savingClassification = true;
+  elements["classification-save"].disabled = true;
+  try {
+    const count = await updatePhotoClassificationOverrides(classificationTargetIds, changes);
+    elements["classification-dialog"].close();
+    if (elements["photo-detail"].open) elements["photo-detail"].close();
+    selectedPhotoIds.clear();
+    photoSelectionMode = false;
+    await renderPhotoView();
+    setPhotoActionMessage(`${count}枚の分類をこの端末で変更しました。画像内の黒板は変更されません。`);
+  } catch (error) {
+    elements["classification-error"].textContent = error?.message || "分類を保存できませんでした。";
+    elements["classification-error"].hidden = false;
+  } finally {
+    savingClassification = false;
+    elements["classification-save"].disabled = false;
+  }
+}
+
+async function resetClassificationChanges() {
+  if (savingClassification || !classificationTargetIds.length) return;
+  if (!confirm(`${classificationTargetIds.length}枚をaoPICから受け取った元の分類へ戻しますか？`)) return;
+  savingClassification = true;
+  elements["classification-save"].disabled = true;
+  try {
+    const count = await updatePhotoClassificationOverrides(classificationTargetIds, {}, true);
+    elements["classification-dialog"].close();
+    if (elements["photo-detail"].open) elements["photo-detail"].close();
+    selectedPhotoIds.clear();
+    photoSelectionMode = false;
+    await renderPhotoView();
+    setPhotoActionMessage(`${count}枚をaoPICの元分類へ戻しました。`);
+  } catch (error) {
+    elements["classification-error"].textContent = error?.message || "元の分類へ戻せませんでした。";
+    elements["classification-error"].hidden = false;
+  } finally {
+    savingClassification = false;
+    elements["classification-save"].disabled = false;
+  }
 }
 
 async function buildPhotoDeleteDialogPreview(photoInternalIds) {
@@ -781,6 +884,7 @@ elements["photo-select-clear"].addEventListener("click", () => {
   selectedPhotoIds.clear();
   renderPhotoCards();
 });
+elements["photo-classify-selected"].addEventListener("click", () => openClassificationEditor([...selectedPhotoIds]));
 elements["photo-delete-selected"].addEventListener("click", () => openPhotoDeleteDialog([...selectedPhotoIds]));
 elements["show-active-photos"].addEventListener("click", async () => {
   photoListMode = "active";
@@ -795,6 +899,12 @@ elements["show-trashed-photos"].addEventListener("click", async () => {
   await renderPhotoView();
 });
 elements["close-detail"].addEventListener("click", () => elements["photo-detail"].close());
+elements["detail-edit-classification"].addEventListener("click", () => {
+  const id = currentDetailPhoto?.internalId;
+  if (!id) return;
+  elements["photo-detail"].close();
+  openClassificationEditor([id]);
+});
 elements["detail-delete-photo"].addEventListener("click", () => {
   const photoInternalId = currentDetailPhoto?.internalId;
   if (!photoInternalId) return;
@@ -807,6 +917,20 @@ elements["photo-detail"].addEventListener("close", () => {
   detailUrl = null;
   currentDetailPhoto = null;
   elements["detail-image"].removeAttribute("src");
+});
+elements["classification-form"].addEventListener("submit", saveClassificationChanges);
+elements["classification-reset"].addEventListener("click", resetClassificationChanges);
+for (const id of ["classification-cancel", "classification-close"]) elements[id].addEventListener("click", () => {
+  if (!savingClassification) elements["classification-dialog"].close();
+});
+elements["classification-dialog"].addEventListener("cancel", event => {
+  if (savingClassification) event.preventDefault();
+});
+elements["classification-dialog"].addEventListener("close", () => {
+  if (!savingClassification) {
+    classificationTargetIds = [];
+    elements["classification-fields"].replaceChildren();
+  }
 });
 elements["photo-delete-form"].addEventListener("submit", confirmPhotoDeletion);
 elements["photo-delete-confirm-text"].addEventListener("input", () => {

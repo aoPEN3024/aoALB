@@ -6,11 +6,11 @@ import {
   getPhotoDeletionPreview, deleteLocalPhotos, updatePhotoClassificationOverrides
 } from "./storage.js";
 import { initLedgerEditor } from "./ledger.js";
-import { initSiteSharing } from "./sharing.js?v=20260731-photo-delete2";
+import { initSiteSharing } from "./sharing.js?v=20260805-account-common1";
 import { loadPhotoAsset, syncCloudTrash } from "./cloud/receiver.js";
 import { photoDeleteConfirmation, photoSourceKind } from "./photo-delete.js";
 import { CLASSIFICATION_FIELDS, effectiveClassification, hasClassificationOverride } from "./classification.js";
-import { initAccountUI } from "./account.js?v=20260805-account1";
+import { initAccountUI } from "./account.js?v=20260805-account-common1";
 
 const views = ["import", "projects", "photos", "ledgers", "history", "sharing"];
 const elements = Object.fromEntries(Array.from(document.querySelectorAll("[id]"), element => [element.id, element]));

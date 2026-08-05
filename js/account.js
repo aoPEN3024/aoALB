@@ -1,5 +1,5 @@
 import { loadCloudConfig, loadLocalCloudConfig } from "./cloud/config.js";
-import { createSupabaseProvider } from "./cloud/supabase-provider.js?v=20260731-photo-delete2";
+import { createSupabaseProvider } from "./cloud/supabase-provider.js?v=20260805-account-common1";
 import { clearSharedDeviceData } from "./storage.js";
 
 const DEVICE_KEY = "aoALB:accountDeviceUid";

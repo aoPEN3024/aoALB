@@ -3,6 +3,7 @@ select table_schema, table_name, is_insertable_into
 from information_schema.tables
 where (table_schema, table_name) in (
   ('public','user_profiles'), ('public','account_devices'), ('private','account_security_audit')
+)
 order by table_schema, table_name;
 
 select c.relname, c.relrowsecurity

@@ -212,11 +212,22 @@ export async function saveLedgerWithCloudChange(ledger, change = null) {
   const done = transactionDone(tx);
   try {
     tx.objectStore("ledgers").put(structuredClone(ledger));
-    tx.objectStore("cloudChanges").put(structuredClone({
-      ...change, changeId: change.changeId || crypto.randomUUID(), status: "pending",
-      attempts: Number(change.attempts || 0), createdAt: change.createdAt || new Date().toISOString(),
+    const changeStore = tx.objectStore("cloudChanges");
+    const prior = change.entityKey ? await requestResult(changeStore.index("entityKey").get(change.entityKey)) : null;
+    const canCoalesce = prior && prior.status !== "uploading";
+    const queued = structuredClone({
+      ...change,
+      changeId: canCoalesce ? prior.changeId : change.changeId || crypto.randomUUID(),
+      eventId: canCoalesce ? prior.eventId || change.eventId : change.eventId,
+      payload: change.entityType === "ledger" && canCoalesce
+        ? { ...change.payload, eventId: prior.payload?.eventId || change.payload?.eventId }
+        : change.payload,
+      status: "pending",
+      attempts: canCoalesce ? Number(prior.attempts || 0) : Number(change.attempts || 0),
+      createdAt: canCoalesce ? prior.createdAt : change.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString()
-    }));
+    });
+    changeStore.put(queued);
     await done;
     return ledger;
   } catch (error) {

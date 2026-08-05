@@ -53,8 +53,9 @@ export async function saveLedgerForProject(ledger, project, photos) {
   const local = { ...ledger, cloud: { ...(ledger.cloud || {}), siteId: project.siteId }, syncStatus: "pending" };
   await saveLedgerWithCloudChange(local, change);
   globalThis.dispatchEvent?.(new CustomEvent("aoalb:ledger-sync-status", { detail: { pending: true } }));
-  if (online()) flushCloudChanges().catch(() => {});
-  return local;
+  if (!online()) return local;
+  await flushCloudChanges();
+  return (await getLedgers()).find(row => row.internalId === local.internalId) || local;
 }
 
 async function sendChange(change) {

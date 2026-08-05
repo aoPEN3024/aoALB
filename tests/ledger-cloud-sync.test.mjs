@@ -9,6 +9,8 @@ const html=readFileSync(new URL("../index.html",import.meta.url),"utf8");
 
 assert.match(storage,/DB_VERSION = 5/);
 assert.match(storage,/db\.transaction\(\["ledgers", "cloudChanges"\], "readwrite"\)/);
+assert.match(storage,/changeStore\.index\("entityKey"\)\.get\(change\.entityKey\)/);
+assert.match(storage,/prior\.payload\?\.eventId \|\| change\.payload\?\.eventId/);
 assert.match(storage,/db\.transaction\(\["cloudConflicts", "cloudChanges"\], "readwrite"\)/);
 assert.match(storage,/db\.transaction\(\["photos", "cloudChanges"\], "readwrite"\)/);
 assert.match(sync,/expectedRevision: Number\(ledger\.cloud\?\.revision \|\| 0\)/);
@@ -20,6 +22,8 @@ assert.match(storage,/resolveClassificationConflict/);
 assert.match(storage,/expectedRevision: Number\(conflict\.cloudRevision \|\| 0\)/);
 assert.match(sync,/if \(!project\?\.siteId[^]+return saveLedger\(ledger\)/);
 assert.match(sync,/remoteByLocal/);
+assert.match(sync,/await flushCloudChanges\(\)/);
+assert.match(sync,/getLedgers\(\)\)\.find\(row => row\.internalId === local\.internalId\)/);
 assert.match(ledger,/saveLedgerForProject/);
 assert.match(provider,/save_ledger_snapshot/);
 assert.match(provider,/save_photo_classification_override/);

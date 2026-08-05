@@ -1,5 +1,5 @@
 import { loadCloudConfig, loadLocalCloudConfig } from "./cloud/config.js";
-import { createSupabaseProvider } from "./cloud/supabase-provider.js";
+import { createSupabaseProvider } from "./cloud/supabase-provider.js?v=20260731-photo-delete2";
 import { clearSharedDeviceData } from "./storage.js";
 
 const DEVICE_KEY = "aoALB:accountDeviceUid";
@@ -15,8 +15,15 @@ function deviceUid() {
 
 function redirectUrl() {
   const url = new URL(location.href);
+  url.searchParams.delete("code");
   url.hash = "sharing";
   return url.href;
+}
+
+function clearAuthCallbackUrl() {
+  const url = new URL(location.href);
+  url.searchParams.delete("code");
+  history.replaceState(history.state, "", `${url.pathname}${url.search}${url.hash || "#sharing"}`);
 }
 
 export function initAccountUI() {
@@ -46,6 +53,10 @@ export function initAccountUI() {
     const config = loadCloudConfig() || await loadLocalCloudConfig();
     if (!config) throw new Error("共有機能の接続設定がありません。端末内モードは引き続き利用できます。");
     provider = await createSupabaseProvider(config);
+    if (new URL(location.href).searchParams.has("code")) {
+      await provider.consumeAuthCallback(location.href);
+      clearAuthCallbackUrl();
+    }
     unsubscribe ||= provider.onAuthStateChange(() => { render().catch(() => {}); });
     return provider;
   }

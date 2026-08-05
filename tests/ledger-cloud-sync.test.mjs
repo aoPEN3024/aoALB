@@ -25,6 +25,8 @@ assert.match(sync,/remoteByLocal/);
 assert.match(sync,/await flushCloudChanges\(\)/);
 assert.match(sync,/getLedgers\(\)\)\.find\(row => row\.internalId === local\.internalId\)/);
 assert.match(ledger,/saveLedgerForProject/);
+assert.match(ledger,/normalized\.cloud = clone\(value\.cloud\)/);
+assert.match(ledger,/normalized\.syncStatus = value\.syncStatus/);
 assert.match(provider,/save_ledger_snapshot/);
 assert.match(provider,/save_photo_classification_override/);
 assert.match(html,/id="ledger-conflict-list"/);

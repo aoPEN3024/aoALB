@@ -61,7 +61,7 @@ export function normalizeLedger(value) {
   const now = new Date().toISOString();
   const ledgerId = value?.ledgerId || value?.internalId || crypto.randomUUID();
   const pages = pagesFromSlots(flattenSlots(value || {}));
-  return {
+  const normalized = {
     internalId: value?.internalId || ledgerId,
     ledgerId,
     schemaVersion: LEDGER_SCHEMA_VERSION,
@@ -76,6 +76,11 @@ export function normalizeLedger(value) {
     createdAt: value?.createdAt || now,
     updatedAt: value?.updatedAt || now
   };
+  if (value?.cloud && typeof value.cloud === "object" && !Array.isArray(value.cloud)) {
+    normalized.cloud = clone(value.cloud);
+  }
+  if (typeof value?.syncStatus === "string") normalized.syncStatus = value.syncStatus;
+  return normalized;
 }
 
 export function createLedger(projectId, title = "施工状況写真") {

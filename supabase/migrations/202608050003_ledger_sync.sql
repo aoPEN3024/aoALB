@@ -105,7 +105,7 @@ begin
   end if;
   insert into public.photo_classification_overrides(photo_id, site_id, override_data, edited_by)
     values (p_photo_id, v_photo.site_id, p_override_data, auth.uid())
-  on conflict (photo_id) do update set override_data = excluded.override_data,
+  on conflict on constraint photo_classification_overrides_pkey do update set override_data = excluded.override_data,
     edited_by = auth.uid(), updated_at = now();
   insert into public.sync_events(event_id, site_id, actor_user_id, entity_type, entity_id, event_type, payload)
     values (p_event_id, v_photo.site_id, auth.uid(), 'photo_classification_override', p_photo_id,
@@ -156,8 +156,8 @@ begin
     if p_expected_revision is distinct from v_ledger.revision then raise exception using errcode='40001', message='revision_conflict'; end if;
     update public.ledgers set title=btrim(p_title), template=p_template, show_cover=p_show_cover,
       view_mode=p_view_mode, updated_by=auth.uid(), updated_at=now() where id=v_ledger.id returning * into v_ledger;
-    delete from public.ledger_pages where ledger_id = v_ledger.id;
-    delete from public.ledger_photo_captions where ledger_id = v_ledger.id;
+    delete from public.ledger_pages where public.ledger_pages.ledger_id = v_ledger.id;
+    delete from public.ledger_photo_captions where public.ledger_photo_captions.ledger_id = v_ledger.id;
   end if;
 
   for v_page, v_page_ord in select value, ordinality from jsonb_array_elements(p_pages) with ordinality loop

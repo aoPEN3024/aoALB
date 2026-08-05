@@ -23,11 +23,81 @@ export async function createSupabaseProvider(config) {
 async function buildSupabaseProvider(config) {
   const { createClient } = await import(SUPABASE_SDK_URL);
   const client = createClient(config.projectUrl, config.publishableKey, {
-    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false, storageKey: "aoALB:supabase-auth" }
+    auth: {
+      persistSession: true, autoRefreshToken: true, detectSessionInUrl: true,
+      flowType: "pkce", storageKey: "aoALB:supabase-auth"
+    }
   });
   let channel = null;
 
   return {
+    async getAccountSession() {
+      const { data, error } = await client.auth.getSession();
+      if (error) throw error;
+      const user = data.session?.user;
+      return user ? {
+        userId: user.id, email: user.email || "", anonymous: user.is_anonymous === true,
+        emailConfirmed: Boolean(user.email_confirmed_at),
+        displayName: String(user.user_metadata?.display_name || ""), session: data.session
+      } : null;
+    },
+    async signInWithPassword({ email, password }) {
+      const { data, error } = await client.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      return {
+        userId: data.user.id, email: data.user.email || "", anonymous: false,
+        displayName: String(data.user.user_metadata?.display_name || "")
+      };
+    },
+    async signUpWithPassword({ email, password, displayName, redirectTo }) {
+      const { data, error } = await client.auth.signUp({
+        email, password,
+        options: { emailRedirectTo: redirectTo, data: { display_name: displayName } }
+      });
+      if (error) throw error;
+      return { userId: data.user?.id || "", confirmationRequired: !data.session };
+    },
+    async requestPasswordReset({ email, redirectTo }) {
+      const { error } = await client.auth.resetPasswordForEmail(email, { redirectTo });
+      if (error) throw error;
+    },
+    async updatePassword(password) {
+      const { data, error } = await client.auth.updateUser({ password });
+      if (error) throw error;
+      return data.user;
+    },
+    async beginAnonymousUpgrade({ email, displayName, redirectTo }) {
+      const current = await this.getAccountSession();
+      if (!current?.anonymous) throw new Error("匿名利用中の端末だけを昇格できます。");
+      const { data, error } = await client.auth.updateUser(
+        { email, data: { display_name: displayName } },
+        { emailRedirectTo: redirectTo }
+      );
+      if (error) throw error;
+      return data.user;
+    },
+    async ensureAccountProfile({ displayName, deviceUid, deviceName }) {
+      const profileResult = await client.rpc("ensure_my_profile", { p_display_name: displayName });
+      if (profileResult.error) throw profileResult.error;
+      const deviceResult = await client.rpc("touch_my_account_device", {
+        p_device_uid: deviceUid, p_device_name: deviceName
+      });
+      if (deviceResult.error) throw deviceResult.error;
+      return { profile: profileResult.data?.[0] || null, device: deviceResult.data?.[0] || null };
+    },
+    async listAccountDevices() {
+      const { data, error } = await client.rpc("list_my_account_devices");
+      if (error) throw error;
+      return data || [];
+    },
+    onAuthStateChange(callback) {
+      const { data } = client.auth.onAuthStateChange((event, session) => callback(event, session));
+      return () => data.subscription.unsubscribe();
+    },
+    async signOut() {
+      const { error } = await client.auth.signOut({ scope: "local" });
+      if (error) throw error;
+    },
     async authenticate() {
       const { data: current, error: sessionError } = await client.auth.getSession();
       if (sessionError) throw sessionError;

@@ -343,6 +343,12 @@ dialog::backdrop { background: rgba(12,24,42,.62); }
 .classification-field-reset.active { border-color: var(--red); color: var(--red); background: #fff3f3; }
 .classification-footer { position: sticky; bottom: 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 12px 20px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: #fff; }
 @media (max-width: 520px) { .classification-input-row { grid-template-columns: 1fr; } .classification-field-reset { width: 100%; } }
+.account-forms { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; }
+.account-form { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.account-form h3 { margin: 0 0 10px; color: var(--blue); }
+.account-form[hidden] { display: none; }
+.account-form ul { padding-left: 20px; }
+@media (max-width: 720px) { .account-forms { grid-template-columns: 1fr; } }
 .photo-delete-dialog { width: min(680px,calc(100% - 20px)); }
 .photo-delete-dialog form { display: flex; flex-direction: column; max-height: calc(100dvh - 32px); }
 .photo-delete-body { overflow-y: auto; padding: 18px 20px; }

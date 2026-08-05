@@ -1,5 +1,5 @@
 -- aoALB cloud ledger and classification override synchronization.
--- Apply after 202608050001_account_foundation.sql. Do not rerun.
+-- Apply after 202608050002_fix_account_rpc_ambiguity.sql. Do not rerun.
 begin;
 
 do $preflight$

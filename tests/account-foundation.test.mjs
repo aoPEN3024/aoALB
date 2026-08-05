@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const migration = readFileSync(new URL("../supabase/migrations/202608050001_account_foundation.sql", import.meta.url), "utf8");
+const ambiguityFix = readFileSync(new URL("../supabase/migrations/202608050002_fix_account_rpc_ambiguity.sql", import.meta.url), "utf8");
 const rollback = readFileSync(new URL("../supabase/rollback/202608050099_rollback_account_foundation.sql", import.meta.url), "utf8");
 
 for (const table of ["user_profiles", "account_devices", "account_security_audit"]) {
@@ -15,4 +16,8 @@ assert.doesNotMatch(migration, /service_role|secret key|password\s*text|email\s*
 assert.match(migration, /when exists[\s\S]+user_profiles[\s\S]+else true/);
 assert.match(rollback, /create or replace function private\.site_role_for/);
 assert.match(rollback, /drop table if exists public\.user_profiles/);
+assert.match(ambiguityFix, /on conflict on constraint user_profiles_pkey/);
+assert.match(ambiguityFix, /on conflict on constraint account_devices_user_id_device_uid_key/);
+assert.match(ambiguityFix, /security definer set search_path = ''/);
+assert.doesNotMatch(ambiguityFix, /on conflict\s*\(\s*user_id/);
 console.log("account foundation static checks passed");

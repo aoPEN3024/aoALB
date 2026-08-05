@@ -1,0 +1,13 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+const sql=readFileSync(new URL("../supabase/migrations/202608050003_ledger_sync.sql",import.meta.url),"utf8");
+for(const name of ["photo_classification_overrides","ledger_photo_captions","save_ledger_snapshot","save_photo_classification_override","list_site_ledger_snapshots"]) assert.match(sql,new RegExp(name));
+assert.match(sql,/language plpgsql security definer set search_path = ''/);
+assert.match(sql,/p_expected_revision is distinct from v_ledger\.revision/);
+assert.match(sql,/delete from public\.ledger_pages[\s\S]+delete from public\.ledger_photo_captions/);
+assert.match(sql,/jsonb_array_length\(v_page->'slots'\) <> 3/);
+assert.match(sql,/duplicate_photo_in_ledger/);
+assert.match(sql,/photo_site_mismatch_or_trashed/);
+assert.match(sql,/on conflict \(event_id\) do nothing/);
+assert.doesNotMatch(sql,/service_role|secret key|password/i);
+console.log("ledger sync foundation static checks passed");

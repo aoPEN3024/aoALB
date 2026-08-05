@@ -11,6 +11,7 @@ import { loadPhotoAsset, syncCloudTrash } from "./cloud/receiver.js";
 import { photoDeleteConfirmation, photoSourceKind } from "./photo-delete.js";
 import { CLASSIFICATION_FIELDS, effectiveClassification, hasClassificationOverride } from "./classification.js";
 import { initAccountUI } from "./account.js?v=20260805-account1";
+import { initCloudLedgerSyncUI } from "./cloud/ledger-sync.js?v=20260805-ledger1";
 
 const views = ["import", "projects", "photos", "ledgers", "history", "sharing"];
 const elements = Object.fromEntries(Array.from(document.querySelectorAll("[id]"), element => [element.id, element]));
@@ -25,6 +26,7 @@ const thumbnailUrls = new Set();
 let ledgerEditor = null;
 let sharingController = null;
 let accountController = null;
+let cloudLedgerSyncUI = null;
 let projectDeletionPreview = null;
 let deletingProject = false;
 let photoSelectionMode = false;
@@ -676,6 +678,7 @@ async function saveClassificationChanges(event) {
   elements["classification-save"].disabled = true;
   try {
     const count = await updatePhotoClassificationOverrides(classificationTargetIds, changes, false, resetFields);
+    window.dispatchEvent(new CustomEvent("aoalb:cloud-change-pending"));
     elements["classification-dialog"].close();
     if (elements["photo-detail"].open) elements["photo-detail"].close();
     selectedPhotoIds.clear();
@@ -1013,13 +1016,19 @@ window.addEventListener("aoalb:cloud-cache-cleared", () => {
   revokeThumbnailUrls();
   if (!elements["view-photos"].hidden) renderPhotoCards();
 });
+window.addEventListener("aoalb:ledger-cloud-updated", () => {
+  if (!elements["view-photos"].hidden) renderPhotoView();
+  if (!elements["view-ledgers"].hidden) ledgerEditor?.activate(selectedProjectUid);
+});
 
 try {
   await openDatabase();
   ledgerEditor = initLedgerEditor();
   sharingController = initSiteSharing();
   accountController = initAccountUI();
+  cloudLedgerSyncUI = initCloudLedgerSyncUI();
   await accountController.start();
+  await cloudLedgerSyncUI.render();
   await sharingController.start();
   await Promise.all([renderProjects(), renderHistory()]);
   showView(location.hash.slice(1) || "import");

@@ -13,9 +13,11 @@ function deviceUid() {
   return value;
 }
 
-function redirectUrl() {
+function redirectUrl(authAction = "") {
   const url = new URL(location.href);
   url.searchParams.delete("code");
+  if (authAction) url.searchParams.set("authAction", authAction);
+  else url.searchParams.delete("authAction");
   url.hash = "sharing";
   return url.href;
 }
@@ -23,6 +25,7 @@ function redirectUrl() {
 function clearAuthCallbackUrl() {
   const url = new URL(location.href);
   url.searchParams.delete("code");
+  url.searchParams.delete("authAction");
   history.replaceState(history.state, "", `${url.pathname}${url.search}${url.hash || "#sharing"}`);
 }
 
@@ -53,8 +56,12 @@ export function initAccountUI() {
     const config = loadCloudConfig() || await loadLocalCloudConfig();
     if (!config) throw new Error("共有機能の接続設定がありません。端末内モードは引き続き利用できます。");
     provider = await createSupabaseProvider(config);
-    if (new URL(location.href).searchParams.has("code")) {
+    const callbackUrl = new URL(location.href);
+    if (callbackUrl.searchParams.has("code")) {
       await provider.consumeAuthCallback(location.href);
+      if (callbackUrl.searchParams.get("authAction") === "recovery") {
+        localStorage.setItem(PENDING_PASSWORD_KEY, "1");
+      }
       clearAuthCallbackUrl();
     }
     unsubscribe ||= provider.onAuthStateChange(() => { render().catch(() => {}); });
@@ -133,7 +140,7 @@ export function initAccountUI() {
   });
   ui.reset.addEventListener("submit", event => {
     event.preventDefault(); run(async () => {
-      await (await getProvider()).requestPasswordReset({ email: formValue(ui.reset, "email"), redirectTo: redirectUrl() });
+      await (await getProvider()).requestPasswordReset({ email: formValue(ui.reset, "email"), redirectTo: redirectUrl("recovery") });
       ui.reset.reset(); setMessage("パスワード再設定メールを送りました。");
     });
   });

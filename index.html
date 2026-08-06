@@ -140,6 +140,53 @@
         <p>同じ工事に参加した端末で、写真を共有して台帳を作れます。共有しない場合も、この端末だけで従来どおり利用できます。</p>
       </div>
       <div class="sharing-grid">
+        <section id="account-panel" class="sharing-card sharing-wide account-panel">
+          <h2>アカウント</h2>
+          <p id="account-state">確認しています…</p>
+          <p class="limit-note">ログインすると、同じアカウントを使うPC・スマートフォン・PWAで共有工事を利用できます。ZIP取込みだけならログインは不要です。</p>
+          <p id="account-message" class="sharing-message" role="status" aria-live="polite"></p>
+          <div class="account-forms">
+            <form id="account-login-form" class="sharing-form account-form">
+              <h3>ログイン</h3>
+              <label>メールアドレス<input name="email" type="email" required autocomplete="username"></label>
+              <label>パスワード<input name="password" type="password" required autocomplete="current-password"></label>
+              <label>この端末の名前<input name="deviceName" type="text" maxlength="80" placeholder="事務所PC"></label>
+              <button type="submit" class="primary">ログイン</button>
+            </form>
+            <form id="account-signup-form" class="sharing-form account-form">
+              <h3>アカウントを作成</h3>
+              <label>表示名<input name="displayName" type="text" required maxlength="80" autocomplete="name"></label>
+              <label>メールアドレス<input name="email" type="email" required autocomplete="email"></label>
+              <label>パスワード<input name="password" type="password" required minlength="10" maxlength="72" autocomplete="new-password"></label>
+              <label>パスワード（確認）<input name="confirmation" type="password" required minlength="10" maxlength="72" autocomplete="new-password"></label>
+              <button type="submit" class="secondary">作成</button>
+            </form>
+            <form id="account-upgrade-form" class="sharing-form account-form" hidden>
+              <h3>現在の工事をアカウントへ引き継ぐ</h3>
+              <p class="limit-note">現在の工事・写真・権限を維持したままメール登録します。</p>
+              <label>表示名<input name="displayName" type="text" required maxlength="80"></label>
+              <label>メールアドレス<input name="email" type="email" required autocomplete="email"></label>
+              <button type="submit" class="primary">確認メールを送る</button>
+            </form>
+            <form id="account-reset-form" class="sharing-form account-form">
+              <h3>パスワードを忘れた場合</h3>
+              <label>メールアドレス<input name="email" type="email" required autocomplete="email"></label>
+              <button type="submit" class="secondary">再設定メールを送る</button>
+            </form>
+            <form id="account-new-password-form" class="sharing-form account-form" hidden>
+              <h3>パスワードを設定</h3>
+              <label>新しいパスワード<input name="password" type="password" required minlength="10" maxlength="72" autocomplete="new-password"></label>
+              <label>新しいパスワード（確認）<input name="confirmation" type="password" required minlength="10" maxlength="72" autocomplete="new-password"></label>
+              <button type="submit" class="primary">設定</button>
+            </form>
+            <div id="account-signed-in" class="account-form" hidden>
+              <h3>ログイン中</h3>
+              <p id="account-current-email"></p>
+              <ul id="account-device-list"></ul>
+              <div class="actions"><button id="account-logout" type="button" class="secondary">ログアウト</button><button id="account-clear-device" type="button" class="danger-outline">共有データをこの端末から消去</button></div>
+            </div>
+          </div>
+        </section>
         <section class="sharing-card sharing-wide">
           <h2>現在の利用方法</h2>
           <p id="sharing-mode-status" class="sharing-status">この端末だけ</p>
@@ -493,6 +540,6 @@
   </dialog>
 
   <script src="vendor/jszip.min.js"></script>
-  <script type="module" src="js/app.js?v=20260804-classification2"></script>
+  <script type="module" src="js/app.js?v=20260805-account-common1"></script>
 </body>
 </html>

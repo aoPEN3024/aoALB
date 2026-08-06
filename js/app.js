@@ -6,10 +6,11 @@ import {
   getPhotoDeletionPreview, deleteLocalPhotos, updatePhotoClassificationOverrides
 } from "./storage.js";
 import { initLedgerEditor } from "./ledger.js";
-import { initSiteSharing } from "./sharing.js?v=20260731-photo-delete2";
+import { initSiteSharing } from "./sharing.js?v=20260805-account-common1";
 import { loadPhotoAsset, syncCloudTrash } from "./cloud/receiver.js";
 import { photoDeleteConfirmation, photoSourceKind } from "./photo-delete.js";
 import { CLASSIFICATION_FIELDS, effectiveClassification, hasClassificationOverride } from "./classification.js";
+import { initAccountUI } from "./account.js?v=20260805-account-common1";
 
 const views = ["import", "projects", "photos", "ledgers", "history", "sharing"];
 const elements = Object.fromEntries(Array.from(document.querySelectorAll("[id]"), element => [element.id, element]));
@@ -23,6 +24,7 @@ let thumbnailObserver = null;
 const thumbnailUrls = new Set();
 let ledgerEditor = null;
 let sharingController = null;
+let accountController = null;
 let projectDeletionPreview = null;
 let deletingProject = false;
 let photoSelectionMode = false;
@@ -1016,6 +1018,8 @@ try {
   await openDatabase();
   ledgerEditor = initLedgerEditor();
   sharingController = initSiteSharing();
+  accountController = initAccountUI();
+  await accountController.start();
   await sharingController.start();
   await Promise.all([renderProjects(), renderHistory()]);
   showView(location.hash.slice(1) || "import");

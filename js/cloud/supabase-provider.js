@@ -82,12 +82,12 @@ async function buildSupabaseProvider(config) {
       const { error } = await client.auth.resetPasswordForEmail(email, { redirectTo });
       if (error) throw error;
     },
-    async updatePassword(password) {
+    async updatePassword(password, { allowAlreadySet = false } = {}) {
       const { data, error } = await client.auth.updateUser({ password });
       // A previous attempt may have updated the password before a later
       // profile RPC failed. In that recovery case Supabase reports
       // `same_password`; the password is already set and setup can continue.
-      if (error && error.code !== "same_password") throw error;
+      if (error && !(allowAlreadySet && error.code === "same_password")) throw error;
       // The access token issued before an anonymous-account upgrade can still
       // carry the old anonymous claim. Refresh it before calling account RPCs.
       const { data: refreshed, error: refreshError } = await client.auth.refreshSession();

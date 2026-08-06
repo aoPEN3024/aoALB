@@ -19,12 +19,16 @@ assert.match(provider, /exchangeCodeForSession\(code\)/);
 assert.match(provider, /detectSessionInUrl: false/);
 assert.match(provider, /data\.session\.user\.is_anonymous === true/);
 assert.match(provider, /await client\.auth\.refreshSession\(\)/);
-assert.match(provider, /async updatePassword\(password\)[\s\S]*client\.auth\.refreshSession\(\)/);
-assert.match(provider, /error\.code !== "same_password"/);
+assert.match(provider, /async updatePassword\(password, \{ allowAlreadySet = false \} = \{\}\)[\s\S]*client\.auth\.refreshSession\(\)/);
+assert.match(provider, /allowAlreadySet && error\.code === "same_password"/);
 assert.match(account, /searchParams\.delete\("code"\)/);
 assert.match(account, /redirectUrl\("recovery"\)/);
-assert.match(account, /searchParams\.get\("authAction"\) === "recovery"[\s\S]*localStorage\.setItem\(PENDING_PASSWORD_KEY, "1"\)/);
+assert.match(account, /searchParams\.get\("authAction"\) === PASSWORD_MODE_RECOVERY[\s\S]*localStorage\.setItem\(PENDING_PASSWORD_KEY, PASSWORD_MODE_RECOVERY\)/);
 assert.match(account, /searchParams\.delete\("authAction"\)/);
+assert.match(account, /PASSWORD_MODE_UPGRADE/);
+assert.match(account, /PASSWORD_MODE_RECOVERY/);
+assert.match(account, /\["1", PASSWORD_MODE_UPGRADE, PASSWORD_MODE_RECOVERY\]\.includes\(pendingPasswordMode\)/);
+assert.match(account, /allowAlreadySet: passwordMode === PASSWORD_MODE_UPGRADE \|\| passwordMode === "1"/);
 assert.equal(
   account.match(/\.\/cloud\/supabase-provider\.js\?v=[^"']+/)?.[0],
   sharing.match(/\.\/cloud\/supabase-provider\.js\?v=[^"']+/)?.[0]

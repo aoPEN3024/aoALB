@@ -6,6 +6,8 @@ const DEVICE_KEY = "aoALB:accountDeviceUid";
 const DEVICE_NAME_KEY = "aoALB:accountDeviceName";
 const MODE_KEY = "aoALB:sharingMode";
 const PENDING_PASSWORD_KEY = "aoALB:pendingPasswordSetup";
+const PASSWORD_MODE_UPGRADE = "upgrade";
+const PASSWORD_MODE_RECOVERY = "recovery";
 
 function deviceUid() {
   let value = localStorage.getItem(DEVICE_KEY);
@@ -59,8 +61,8 @@ export function initAccountUI() {
     const callbackUrl = new URL(location.href);
     if (callbackUrl.searchParams.has("code")) {
       await provider.consumeAuthCallback(location.href);
-      if (callbackUrl.searchParams.get("authAction") === "recovery") {
-        localStorage.setItem(PENDING_PASSWORD_KEY, "1");
+      if (callbackUrl.searchParams.get("authAction") === PASSWORD_MODE_RECOVERY) {
+        localStorage.setItem(PENDING_PASSWORD_KEY, PASSWORD_MODE_RECOVERY);
       }
       clearAuthCallbackUrl();
     }
@@ -77,7 +79,8 @@ export function initAccountUI() {
     ui.reset.hidden = Boolean(session);
     ui.upgrade.hidden = !session?.anonymous;
     ui.signedIn.hidden = !session || session.anonymous;
-    ui.password.hidden = !(session && !session.anonymous && localStorage.getItem(PENDING_PASSWORD_KEY) === "1");
+    const pendingPasswordMode = localStorage.getItem(PENDING_PASSWORD_KEY);
+    ui.password.hidden = !(session && !session.anonymous && ["1", PASSWORD_MODE_UPGRADE, PASSWORD_MODE_RECOVERY].includes(pendingPasswordMode));
     if (!session) {
       ui.state.textContent = "ログインしていません。端末内のZIP取込みと台帳はそのまま利用できます。";
       return;
@@ -133,7 +136,7 @@ export function initAccountUI() {
       await (await getProvider()).beginAnonymousUpgrade({
         email: formValue(ui.upgrade, "email"), displayName: formValue(ui.upgrade, "displayName"), redirectTo: redirectUrl()
       });
-      localStorage.setItem(PENDING_PASSWORD_KEY, "1");
+      localStorage.setItem(PENDING_PASSWORD_KEY, PASSWORD_MODE_UPGRADE);
       ui.upgrade.reset();
       setMessage("確認メールを送りました。メール内のリンクを開いた後、パスワードを設定してください。現在の工事と権限は維持されます。");
     });
@@ -148,7 +151,10 @@ export function initAccountUI() {
     event.preventDefault(); run(async () => {
       const password = formValue(ui.password, "password");
       if (!validPassword(password) || password !== formValue(ui.password, "confirmation")) throw new Error("10文字以上の同じパスワードを2回入力してください。");
-      await (await getProvider()).updatePassword(password);
+      const passwordMode = localStorage.getItem(PENDING_PASSWORD_KEY);
+      await (await getProvider()).updatePassword(password, {
+        allowAlreadySet: passwordMode === PASSWORD_MODE_UPGRADE || passwordMode === "1"
+      });
       const name = localStorage.getItem(DEVICE_NAME_KEY) || "この端末";
       const session = await provider.getAccountSession();
       await provider.ensureAccountProfile({ displayName: session?.displayName || name, deviceUid: deviceUid(), deviceName: name });

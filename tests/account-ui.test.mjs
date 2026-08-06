@@ -22,6 +22,9 @@ assert.match(provider, /await client\.auth\.refreshSession\(\)/);
 assert.match(provider, /async updatePassword\(password\)[\s\S]*client\.auth\.refreshSession\(\)/);
 assert.match(provider, /error\.code !== "same_password"/);
 assert.match(account, /searchParams\.delete\("code"\)/);
+assert.match(account, /redirectUrl\("recovery"\)/);
+assert.match(account, /searchParams\.get\("authAction"\) === "recovery"[\s\S]*localStorage\.setItem\(PENDING_PASSWORD_KEY, "1"\)/);
+assert.match(account, /searchParams\.delete\("authAction"\)/);
 assert.equal(
   account.match(/\.\/cloud\/supabase-provider\.js\?v=[^"']+/)?.[0],
   sharing.match(/\.\/cloud\/supabase-provider\.js\?v=[^"']+/)?.[0]

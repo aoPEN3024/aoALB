@@ -16,10 +16,10 @@ function deviceUid() {
 }
 
 function redirectUrl(authAction = "") {
-  const url = new URL(location.href);
-  url.searchParams.delete("code");
+  // Keep authentication callbacks on the current app origin and path, but do
+  // not carry arbitrary verification/test query parameters into email links.
+  const url = new URL(location.pathname || "/", location.origin);
   if (authAction) url.searchParams.set("authAction", authAction);
-  else url.searchParams.delete("authAction");
   url.hash = "sharing";
   return url.href;
 }

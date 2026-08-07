@@ -3,7 +3,7 @@ import {
 } from "./photo-delete.js";
 
 const DB_NAME = "aoALBDB";
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 let dbPromise;
 
@@ -56,6 +56,18 @@ export function openDatabase() {
         cloudFiles.createIndex("photoUid", "photoUid");
         cloudFiles.createIndex("siteId", "siteId");
         cloudFiles.createIndex("kind", "kind");
+      }
+      if (!db.objectStoreNames.contains("cloudChanges")) {
+        const changes = db.createObjectStore("cloudChanges", { keyPath: "changeId" });
+        changes.createIndex("entityKey", "entityKey");
+        changes.createIndex("siteId", "siteId");
+        changes.createIndex("status", "status");
+      }
+      if (!db.objectStoreNames.contains("cloudConflicts")) {
+        const conflicts = db.createObjectStore("cloudConflicts", { keyPath: "conflictId" });
+        conflicts.createIndex("entityKey", "entityKey");
+        conflicts.createIndex("siteId", "siteId");
+        conflicts.createIndex("resolved", "resolved");
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -128,7 +140,7 @@ export async function saveLedger(ledger) {
 
 export async function clearSharedDeviceData() {
   const db = await openDatabase();
-  const stores = ["projects", "photos", "cloudFiles", "ledgers", "settings"];
+  const stores = ["projects", "photos", "cloudFiles", "ledgers", "settings", "cloudChanges", "cloudConflicts"];
   const tx = db.transaction(stores, "readwrite");
   const done = transactionDone(tx);
   const stats = { projects: 0, photos: 0, files: 0, ledgers: 0 };
@@ -182,6 +194,8 @@ export async function clearSharedDeviceData() {
     for (const key of ["cloud:identity", "cloud:syncQueue", "cloud:photoSyncQueue", "cloud:photoSyncSettings"]) {
       settingStore.delete(key);
     }
+    tx.objectStore("cloudChanges").clear();
+    tx.objectStore("cloudConflicts").clear();
     await done;
     return stats;
   } catch (error) {
@@ -189,6 +203,198 @@ export async function clearSharedDeviceData() {
     await done.catch(() => {});
     throw error;
   }
+}
+
+export async function saveLedgerWithCloudChange(ledger, change = null) {
+  if (!change) return saveLedger(ledger);
+  const db = await openDatabase();
+  const tx = db.transaction(["ledgers", "cloudChanges"], "readwrite");
+  const done = transactionDone(tx);
+  try {
+    tx.objectStore("ledgers").put(structuredClone(ledger));
+    const changeStore = tx.objectStore("cloudChanges");
+    const prior = change.entityKey ? await requestResult(changeStore.index("entityKey").get(change.entityKey)) : null;
+    const canCoalesce = prior && prior.status !== "uploading";
+    const queued = structuredClone({
+      ...change,
+      changeId: canCoalesce ? prior.changeId : change.changeId || crypto.randomUUID(),
+      eventId: canCoalesce ? prior.eventId || change.eventId : change.eventId,
+      payload: change.entityType === "ledger" && canCoalesce
+        ? { ...change.payload, eventId: prior.payload?.eventId || change.payload?.eventId }
+        : change.payload,
+      status: "pending",
+      attempts: canCoalesce ? Number(prior.attempts || 0) : Number(change.attempts || 0),
+      createdAt: canCoalesce ? prior.createdAt : change.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+    changeStore.put(queued);
+    await done;
+    return ledger;
+  } catch (error) {
+    try { tx.abort(); } catch (_) { /* completed or aborted */ }
+    await done.catch(() => {});
+    throw error;
+  }
+}
+
+export async function getCloudChanges(siteId = "") {
+  const rows = await getAll("cloudChanges");
+  return rows.filter(row => !siteId || row.siteId === siteId);
+}
+
+export async function updateCloudChange(changeId, updates) {
+  const db = await openDatabase();
+  const tx = db.transaction("cloudChanges", "readwrite");
+  const done = transactionDone(tx);
+  const store = tx.objectStore("cloudChanges");
+  const current = await requestResult(store.get(changeId));
+  if (current) store.put({ ...current, ...structuredClone(updates), updatedAt: new Date().toISOString() });
+  await done;
+}
+
+export async function deleteCloudChange(changeId) {
+  const db = await openDatabase();
+  const tx = db.transaction("cloudChanges", "readwrite");
+  const done = transactionDone(tx);
+  tx.objectStore("cloudChanges").delete(changeId);
+  await done;
+}
+
+export async function completeCloudLedgerChange(changeId, ledger) {
+  const db = await openDatabase();
+  const tx = db.transaction(["ledgers", "cloudChanges"], "readwrite");
+  const done = transactionDone(tx);
+  tx.objectStore("ledgers").put(structuredClone(ledger));
+  tx.objectStore("cloudChanges").delete(changeId);
+  await done;
+  return ledger;
+}
+
+export async function completeClassificationChange(changeId, localPhotoId, result) {
+  const db = await openDatabase();
+  const tx = db.transaction(["photos", "cloudChanges"], "readwrite");
+  const done = transactionDone(tx);
+  const store = tx.objectStore("photos");
+  const photo = await requestResult(store.get(localPhotoId));
+  if (!photo) { try { tx.abort(); } catch (_) {} await done.catch(() => {}); throw new Error("分類変更した写真が見つかりません。"); }
+  store.put({ ...photo, classificationOverride: structuredClone(result.override_data || {}),
+    classificationOverrideUpdatedAt: result.updated_at,
+    cloud: { ...(photo.cloud || {}), classificationOverrideRevision: Number(result.revision || 1) } });
+  tx.objectStore("cloudChanges").delete(changeId);
+  await done;
+}
+
+export async function mergeCloudClassificationOverrides(rows, pendingRemoteIds = new Set()) {
+  const db = await openDatabase();
+  const tx = db.transaction("photos", "readwrite");
+  const done = transactionDone(tx);
+  const store = tx.objectStore("photos");
+  const photos = await requestResult(store.getAll());
+  const byRemote = new Map(photos.filter(photo => photo.cloud?.remotePhotoId)
+    .map(photo => [photo.cloud.remotePhotoId, photo]));
+  let merged = 0;
+  for (const row of rows) {
+    if (pendingRemoteIds.has(row.photo_id)) continue;
+    const photo = byRemote.get(row.photo_id);
+    if (!photo) continue;
+    store.put({ ...photo, classificationOverride: structuredClone(row.override_data || {}),
+      classificationOverrideUpdatedAt: row.updated_at,
+      cloud: { ...(photo.cloud || {}), classificationOverrideRevision: Number(row.revision || 1) } });
+    merged += 1;
+  }
+  await done;
+  return merged;
+}
+
+export async function recordCloudConflict(conflict, changeId = "") {
+  const db = await openDatabase();
+  const tx = db.transaction(["cloudConflicts", "cloudChanges"], "readwrite");
+  const done = transactionDone(tx);
+  const conflictStore = tx.objectStore("cloudConflicts");
+  const existing = await requestResult(conflictStore.index("entityKey").get(conflict.entityKey));
+  conflictStore.put(structuredClone({
+    ...(existing && !existing.resolved ? existing : {}), ...conflict,
+    conflictId: existing && !existing.resolved ? existing.conflictId : (conflict.conflictId || crypto.randomUUID()),
+    resolved: false,
+    detectedAt: existing && !existing.resolved ? existing.detectedAt : (conflict.detectedAt || new Date().toISOString()),
+    updatedAt: new Date().toISOString()
+  }));
+  if (changeId) tx.objectStore("cloudChanges").delete(changeId);
+  await done;
+}
+
+export const getCloudConflicts = async siteId => (await getAll("cloudConflicts"))
+  .filter(row => !siteId || row.siteId === siteId);
+
+export async function resolveLedgerConflict(conflictId, strategy) {
+  const db = await openDatabase();
+  const tx = db.transaction(["cloudConflicts", "ledgers"], "readwrite");
+  const done = transactionDone(tx);
+  const conflicts = tx.objectStore("cloudConflicts");
+  const conflict = await requestResult(conflicts.get(conflictId));
+  if (!conflict || conflict.resolved || conflict.entityType !== "ledger") {
+    try { tx.abort(); } catch (_) {} await done.catch(() => {});
+    throw new Error("競合情報が見つかりません。再読み込みしてください。");
+  }
+  if (strategy === "cloud") {
+    if (!conflict.cloudValue?.internalId) throw new Error("クラウド版をまだ取得できません。オンラインで最新にしてください。");
+    tx.objectStore("ledgers").put(structuredClone(conflict.cloudValue));
+  } else if (strategy === "copy") {
+    const source = conflict.localValue;
+    if (!source?.pages) throw new Error("端末側の台帳を複製できません。競合情報を残しました。");
+    const now = new Date().toISOString();
+    const copy = { ...structuredClone(source), internalId: crypto.randomUUID(), ledgerId: crypto.randomUUID(),
+      title: `${source.title || "台帳"}（競合コピー）`, createdAt: now, updatedAt: now, syncStatus: "local" };
+    delete copy.cloud;
+    tx.objectStore("ledgers").put(copy);
+  } else throw new Error("競合の解決方法が正しくありません。");
+  conflicts.delete(conflictId);
+  await done;
+}
+
+export async function resolveClassificationConflict(conflictId, strategy) {
+  const db = await openDatabase();
+  const tx = db.transaction(["cloudConflicts", "cloudChanges", "photos"], "readwrite");
+  const done = transactionDone(tx);
+  const conflicts = tx.objectStore("cloudConflicts");
+  const conflict = await requestResult(conflicts.get(conflictId));
+  if (!conflict || conflict.resolved || conflict.entityType !== "classification") {
+    try { tx.abort(); } catch (_) {}
+    await done.catch(() => {});
+    throw new Error("分類の競合情報が見つかりません。最新の状態を読み込んでください。");
+  }
+  const photos = tx.objectStore("photos");
+  const photo = conflict.localPhotoId ? await requestResult(photos.get(conflict.localPhotoId)) : null;
+  if (!photo) {
+    try { tx.abort(); } catch (_) {}
+    await done.catch(() => {});
+    throw new Error("分類を反映する写真がこの端末にありません。");
+  }
+  if (strategy === "cloud") {
+    photos.put({
+      ...photo,
+      classificationOverride: structuredClone(conflict.cloudValue || {}),
+      classificationOverrideUpdatedAt: conflict.cloudUpdatedAt || new Date().toISOString(),
+      cloud: { ...(photo.cloud || {}), classificationOverrideRevision: Number(conflict.cloudRevision || 0) }
+    });
+  } else if (strategy === "retry") {
+    const now = new Date().toISOString();
+    tx.objectStore("cloudChanges").put({
+      changeId: crypto.randomUUID(), entityKey: conflict.entityKey, entityType: "classification",
+      siteId: conflict.siteId, localPhotoId: photo.internalId,
+      remotePhotoId: conflict.remotePhotoId || photo.cloud?.remotePhotoId,
+      expectedRevision: Number(conflict.cloudRevision || 0),
+      payload: structuredClone(conflict.localValue || {}), eventId: crypto.randomUUID(),
+      status: "pending", attempts: 0, createdAt: now, updatedAt: now
+    });
+  } else {
+    try { tx.abort(); } catch (_) {}
+    await done.catch(() => {});
+    throw new Error("分類の競合解決方法が正しくありません。");
+  }
+  conflicts.delete(conflictId);
+  await done;
+  if (strategy === "retry") globalThis.dispatchEvent?.(new CustomEvent("aoalb:cloud-change-pending"));
 }
 
 const STORAGE_BASE_RESERVE = 8 * 1024 * 1024;
@@ -275,9 +481,10 @@ export async function updatePhotoClassificationOverrides(photoInternalIds, chang
   const fieldsToReset = [...new Set((resetFields || []).filter(field => allowed.has(field)))];
   if (!reset && !entries.length && !fieldsToReset.length) throw new Error("変更する分類項目を選択してください。");
   const db = await openDatabase();
-  const tx = db.transaction("photos", "readwrite");
+  const tx = db.transaction(["photos", "cloudChanges"], "readwrite");
   const done = transactionDone(tx);
   const store = tx.objectStore("photos");
+  const changeStore = tx.objectStore("cloudChanges");
   try {
     for (const id of ids) {
       const photo = await requestResult(store.get(id));
@@ -300,6 +507,18 @@ export async function updatePhotoClassificationOverrides(photoInternalIds, chang
         }
       }
       store.put(photo);
+      if (photo.cloud?.siteId && photo.cloud?.remotePhotoId) {
+        const entityKey = `classification:${photo.cloud.remotePhotoId}`;
+        const prior = await requestResult(changeStore.index("entityKey").get(entityKey));
+        changeStore.put({
+          changeId: prior?.changeId || crypto.randomUUID(), entityKey, entityType: "classification",
+          siteId: photo.cloud.siteId, localPhotoId: photo.internalId, remotePhotoId: photo.cloud.remotePhotoId,
+          expectedRevision: Number(photo.cloud.classificationOverrideRevision || 0),
+          payload: structuredClone(photo.classificationOverride || {}), eventId: prior?.eventId || crypto.randomUUID(),
+          status: "pending", attempts: Number(prior?.attempts || 0),
+          createdAt: prior?.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString()
+        });
+      }
     }
     await done;
     return ids.length;
@@ -860,7 +1079,8 @@ export async function mergeCloudSnapshot(siteId, remoteProjects, remotePhotos) {
         project = {
           internalId: crypto.randomUUID(), projectUid: remote.projectUid, koujiId: remote.koujiId ?? null,
           name: remote.name, contractor: remote.contractor || "", source: "cloud", sources: ["cloud"],
-          siteId, createdAt: syncedAt, lastImportedAt: syncedAt, lastCloudSyncedAt: syncedAt
+          siteId, cloud: { siteId, remoteProjectId: remote.id },
+          createdAt: syncedAt, lastImportedAt: syncedAt, lastCloudSyncedAt: syncedAt
         };
         projectStore.add(project);
       } else {
@@ -869,7 +1089,8 @@ export async function mergeCloudSnapshot(siteId, remoteProjects, remotePhotos) {
         }
         const sources = new Set(project.sources || [project.source || "zip"]);
         sources.add("cloud");
-        project = { ...project, sources: [...sources], siteId, lastCloudSyncedAt: syncedAt };
+        project = { ...project, sources: [...sources], siteId,
+          cloud: { ...(project.cloud || {}), siteId, remoteProjectId: remote.id }, lastCloudSyncedAt: syncedAt };
         projectStore.put(project);
       }
       projects.set(remote.id, project);
@@ -918,7 +1139,8 @@ export async function mergeCloudTrashSnapshot(siteId, remoteProjects, remotePhot
         project = {
           internalId: crypto.randomUUID(), projectUid: remote.projectUid, koujiId: remote.koujiId ?? null,
           name: remote.name, contractor: remote.contractor || "", source: "cloud", sources: ["cloud"],
-          siteId, createdAt: syncedAt, lastImportedAt: syncedAt, lastCloudSyncedAt: syncedAt
+          siteId, cloud: { siteId, remoteProjectId: remote.id },
+          createdAt: syncedAt, lastImportedAt: syncedAt, lastCloudSyncedAt: syncedAt
         };
         projectStore.add(project);
       }

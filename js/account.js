@@ -1,6 +1,6 @@
 import { loadCloudConfig, loadLocalCloudConfig } from "./cloud/config.js";
 import { createSupabaseProvider } from "./cloud/supabase-provider.js?v=20260805-account-common1";
-import { clearSharedDeviceData } from "./storage.js";
+import { clearSharedDeviceData, getCloudChanges } from "./storage.js";
 
 const DEVICE_KEY = "aoALB:accountDeviceUid";
 const DEVICE_NAME_KEY = "aoALB:accountDeviceName";
@@ -169,7 +169,9 @@ export function initAccountUI() {
     setTimeout(() => location.reload(), 250);
   }));
   ui.clear.addEventListener("click", () => run(async () => {
-    if (!confirm("共有工事の写真キャッシュと台帳をこの端末から消去します。ZIP取込みデータとクラウド原本は削除されません。よろしいですか？")) return;
+    const pending = (await getCloudChanges()).filter(item => item.status !== "synced");
+    const warning = pending.length ? `\n\n未送信の台帳・分類変更が${pending.length}件あります。消去すると送信できません。` : "";
+    if (!confirm(`共有工事の写真キャッシュと台帳をこの端末から消去します。ZIP取込みデータとクラウド原本は削除されません。${warning}\n\nよろしいですか？`)) return;
     const stats = await clearSharedDeviceData();
     await (await getProvider()).signOut(); localStorage.setItem(MODE_KEY, "local");
     setMessage(`端末データを消去しました（工事${stats.projects}件、写真${stats.photos}件、台帳${stats.ledgers}件）。`);

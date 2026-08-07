@@ -126,10 +126,13 @@ async function buildSupabaseProvider(config) {
       const { error } = await client.auth.signOut({ scope: "local" });
       if (error) throw error;
     },
-    async authenticate() {
+    async authenticate({ allowAnonymous = false } = {}) {
       const { data: current, error: sessionError } = await client.auth.getSession();
       if (sessionError) throw sessionError;
       if (current.session?.user) return { userId: current.session.user.id, anonymous: current.session.user.is_anonymous === true };
+      if (!allowAnonymous) {
+        throw new Error("共有工事を利用するには、先にアカウントへログインしてください。");
+      }
       const { data, error } = await client.auth.signInAnonymously();
       if (error) throw error;
       return { userId: data.user.id, anonymous: true };
@@ -442,6 +445,37 @@ async function buildSupabaseProvider(config) {
       if (error) throw error;
       return data;
     },
+    async listLedgerSnapshots(siteId) {
+      const { data, error } = await client.rpc("list_site_ledger_snapshots", { p_site_id: siteId });
+      if (error) throw error;
+      return Array.isArray(data) ? data : [];
+    },
+    async saveLedgerSnapshot(payload) {
+      const { data, error } = await client.rpc("save_ledger_snapshot", {
+        p_site_id: payload.siteId, p_project_id: payload.remoteProjectId,
+        p_ledger_id: payload.remoteLedgerId || null, p_ledger_uid: payload.ledgerUid,
+        p_expected_revision: Number(payload.expectedRevision || 0), p_title: payload.title,
+        p_template: payload.template, p_show_cover: payload.showCover,
+        p_view_mode: payload.viewMode, p_pages: payload.pages, p_captions: payload.captions,
+        p_event_id: payload.eventId
+      });
+      if (error) throw error;
+      return Array.isArray(data) ? data[0] : data;
+    },
+    async saveClassificationOverride(payload) {
+      const { data, error } = await client.rpc("save_photo_classification_override", {
+        p_photo_id: payload.remotePhotoId, p_expected_revision: Number(payload.expectedRevision || 0),
+        p_override_data: payload.overrideData || {}, p_event_id: payload.eventId
+      });
+      if (error) throw error;
+      return Array.isArray(data) ? data[0] : data;
+    },
+    async listClassificationOverrides(siteId) {
+      const { data, error } = await client.from("photo_classification_overrides")
+        .select("photo_id,override_data,revision,edited_by,updated_at").eq("site_id", siteId);
+      if (error) throw error;
+      return data || [];
+    },
     async downloadPhotoObject(path) {
       if (typeof path !== "string" || !/^[0-9a-f-]{36}\/(photos|thumbnails)\/[0-9a-f-]{36}\.jpg$/.test(path)) {
         throw new Error("共有写真の保存先が正しくありません。");
@@ -456,7 +490,7 @@ async function buildSupabaseProvider(config) {
         event: "INSERT", schema: "public", table: "sync_events", filter: `site_id=eq.${siteId}`
       }, payload => callback({
         eventId: payload.new.event_id, siteId: payload.new.site_id, entityId: payload.new.entity_id,
-        eventType: payload.new.event_type, deviceName: payload.new.device_name,
+        entityType: payload.new.entity_type, eventType: payload.new.event_type, deviceName: payload.new.device_name,
         payload: payload.new.payload, createdAt: payload.new.created_at
       })).subscribe();
       return () => { if (channel) client.removeChannel(channel); channel = null; };

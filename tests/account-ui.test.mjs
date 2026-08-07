@@ -23,6 +23,9 @@ assert.match(provider, /async updatePassword\(password, \{ allowAlreadySet = fal
 assert.match(provider, /allowAlreadySet && error\.code === "same_password"/);
 assert.match(account, /searchParams\.delete\("code"\)/);
 assert.match(account, /redirectUrl\("recovery"\)/);
+assert.match(account, /new URL\(location\.pathname \|\| "\/", location\.origin\)/);
+const redirectFunction = account.slice(account.indexOf("function redirectUrl"), account.indexOf("function clearAuthCallbackUrl"));
+assert.doesNotMatch(redirectFunction, /new URL\(location\.href\)/);
 assert.match(account, /searchParams\.get\("authAction"\) === PASSWORD_MODE_RECOVERY[\s\S]*localStorage\.setItem\(PENDING_PASSWORD_KEY, PASSWORD_MODE_RECOVERY\)/);
 assert.match(account, /searchParams\.delete\("authAction"\)/);
 assert.match(account, /PASSWORD_MODE_UPGRADE/);

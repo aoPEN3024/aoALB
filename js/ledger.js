@@ -2,7 +2,7 @@ import {
   getProjects, getPhotosByProjectUid,
   getLedgersByProjectId, getLedger
 } from "./storage.js";
-import { saveLedgerForProject } from "./cloud/ledger-sync.js";
+import { saveLedgerForProject } from "./cloud/ledger-sync.js?v=20260805-ledger1";
 import { loadPhotoAsset } from "./cloud/receiver.js";
 import { effectiveClassification } from "./classification.js";
 import {

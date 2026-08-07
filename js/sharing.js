@@ -9,7 +9,7 @@ import {
 } from "./cloud/receiver.js";
 import {
   configureCloudLedgerSync, disconnectCloudLedgerSync, flushCloudChanges, syncCloudLedgers
-} from "./cloud/ledger-sync.js";
+} from "./cloud/ledger-sync.js?v=20260805-ledger1";
 import {
   enqueuePhotosForSync, enqueueSyncEvent, getCloudIdentity, getPhotoSyncQueue, getPhotoSyncSettings,
   pendingSyncEvents, recoverInterruptedPhotoUploads, retryPhotoQueueErrors, saveCloudIdentity,

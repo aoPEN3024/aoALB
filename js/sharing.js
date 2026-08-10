@@ -113,6 +113,17 @@ export function initSiteSharing() {
     }
   }
 
+  async function ensureMembershipAuth() {
+    const auth = await provider.authenticate({ allowAnonymous: true });
+    if (identity?.userId && identity.userId !== auth.userId) identity = null;
+    identity = {
+      ...(identity || {}),
+      userId: auth.userId,
+      deviceId: identity?.deviceId || auth.userId,
+      provider: sharingMode()
+    };
+  }
+
   function setReceiveMessage(message, error = false) {
     ui.receiveMessage.textContent = message;
     ui.receiveMessage.classList.toggle("error", error);
@@ -609,6 +620,7 @@ export function initSiteSharing() {
     if (!provider) return setMessage("先に工事の共有を開始してください。", true);
     siteSwitching = true;
     try {
+      await ensureMembershipAuth();
       const membership = await provider.joinSite({ siteCode: ui.siteCode.value, joinCode: ui.joinCode.value, deviceName: ui.deviceName.value.trim() || "名称未設定端末" });
       ui.joinCode.value = "";
       identity = { ...identity, ...membership };
@@ -640,6 +652,7 @@ export function initSiteSharing() {
     if (siteSwitching) return;
     siteSwitching = true;
     try {
+      await ensureMembershipAuth();
       const membership = await provider.claimSiteAdmin({
         siteCode: ui.adminClaimSiteCode.value,
         adminCode: ui.adminClaimCode.value,

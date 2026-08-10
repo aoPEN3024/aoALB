@@ -21,6 +21,8 @@ assert.match(provider, /data\.session\.user\.is_anonymous === true/);
 assert.match(provider, /await client\.auth\.refreshSession\(\)/);
 assert.match(provider, /async updatePassword\(password, \{ allowAlreadySet = false \} = \{\}\)[\s\S]*client\.auth\.refreshSession\(\)/);
 assert.match(provider, /allowAlreadySet && error\.code === "same_password"/);
+assert.match(sharing, /async function ensureMembershipAuth\(\)[\s\S]*authenticate\(\{ allowAnonymous: true \}\)/);
+assert.equal((sharing.match(/await ensureMembershipAuth\(\);/g) || []).length, 2);
 assert.match(account, /searchParams\.delete\("code"\)/);
 assert.match(account, /redirectUrl\("recovery"\)/);
 assert.match(account, /new URL\(location\.pathname \|\| "\/", location\.origin\)/);

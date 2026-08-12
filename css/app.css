@@ -348,6 +348,9 @@ dialog::backdrop { background: rgba(12,24,42,.62); }
 .account-form h3 { margin: 0 0 10px; color: var(--blue); }
 .account-form[hidden] { display: none; }
 .account-form ul { padding-left: 20px; }
+.ledger-conflict-list { display: grid; gap: 10px; padding: 0; list-style: none; }
+.ledger-conflict-list li { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 10px; border: 1px solid #d99; border-radius: 10px; background: #fff7f7; }
+.ledger-conflict-list li span { flex: 1 1 260px; }
 @media (max-width: 720px) { .account-forms { grid-template-columns: 1fr; } }
 .photo-delete-dialog { width: min(680px,calc(100% - 20px)); }
 .photo-delete-dialog form { display: flex; flex-direction: column; max-height: calc(100dvh - 32px); }

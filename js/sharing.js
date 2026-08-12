@@ -8,6 +8,9 @@ import {
   configureCloudReceiver, disconnectCloudReceiver, syncCloudPhotos
 } from "./cloud/receiver.js";
 import {
+  configureCloudLedgerSync, disconnectCloudLedgerSync, flushCloudChanges, syncCloudLedgers
+} from "./cloud/ledger-sync.js?v=20260805-ledger1";
+import {
   enqueuePhotosForSync, enqueueSyncEvent, getCloudIdentity, getPhotoSyncQueue, getPhotoSyncSettings,
   pendingSyncEvents, recoverInterruptedPhotoUploads, retryPhotoQueueErrors, saveCloudIdentity,
   savePhotoSyncSettings, setPhotoQueuePaused, summarizePhotoQueue, updatePhotoQueueItem, updateQueueItem
@@ -333,10 +336,14 @@ export function initSiteSharing() {
     try {
       unsubscribe?.();
       disconnectCloudReceiver();
+      disconnectCloudLedgerSync();
       identity = { ...identity, ...item };
       await saveCloudIdentity(identity);
       subscribeCurrentSite();
-      if (sharingMode() === "cloud") configureCloudReceiver(provider, identity);
+      if (sharingMode() === "cloud") {
+        configureCloudReceiver(provider, identity);
+        configureCloudLedgerSync(provider, identity);
+      }
       setMessage(`${item.siteName}を開きました。`);
       await renderStatus();
       if (sharingMode() === "cloud") await refreshCloudPhotos();
@@ -389,6 +396,7 @@ export function initSiteSharing() {
         unsubscribe?.();
         unsubscribe = null;
         disconnectCloudReceiver();
+        disconnectCloudLedgerSync();
         identity = { userId: identity.userId, deviceId: identity.deviceId, provider: identity.provider };
         await refreshMemberships();
         await saveCloudIdentity(identity);
@@ -403,6 +411,7 @@ export function initSiteSharing() {
     renderEvents();
     if (active) setMessage("所属現場のメタデータ更新を受信しました。");
     if (event.payload?.photoUid || event.eventType === "photo_synced") refreshCloudPhotos({ quiet: true });
+    if (/ledger|classification_override/.test(String(event.eventType || event.entityType || ""))) syncCloudLedgers().catch(() => {});
   }
 
   function subscribeCurrentSite() {
@@ -416,10 +425,12 @@ export function initSiteSharing() {
     provider?.unsubscribe?.();
     provider = null;
     disconnectCloudReceiver();
+    disconnectCloudLedgerSync();
     if (mode === "local") {
       localStorage.setItem(MODE_KEY, "local");
       setMessage("この端末に保存されたデータだけを使用します。");
       disconnectCloudReceiver();
+      disconnectCloudLedgerSync();
       await renderStatus();
       return;
     }
@@ -450,7 +461,10 @@ export function initSiteSharing() {
       await saveCloudIdentity(identity);
       localStorage.setItem(MODE_KEY, mode);
       subscribeCurrentSite();
-      if (mode === "cloud" && identity?.siteId) configureCloudReceiver(provider, identity);
+      if (mode === "cloud" && identity?.siteId) {
+        configureCloudReceiver(provider, identity);
+        configureCloudLedgerSync(provider, identity);
+      }
       setMessage(identity?.siteId ? `${identity.siteName || identity.siteCode}へ再接続しました。` : mode === "mock"
         ? "端末内試作を開始しました。工事PASSはDEMO-ONLYです。"
         : "共有の準備ができました。工事IDと工事PASSを入力してください。");
@@ -623,7 +637,10 @@ export function initSiteSharing() {
       }
       await refreshMemberships();
       subscribeCurrentSite();
-      if (sharingMode() === "cloud") configureCloudReceiver(provider, identity);
+      if (sharingMode() === "cloud") {
+        configureCloudReceiver(provider, identity);
+        configureCloudLedgerSync(provider, identity);
+      }
       setMessage(`${membership.siteName}へ参加しました（${roleLabel(membership.role)}）。`);
     } catch (error) {
       ui.joinCode.value = "";
@@ -655,7 +672,10 @@ export function initSiteSharing() {
       await refreshMemberships();
       await saveCloudIdentity(identity);
       subscribeCurrentSite();
-      if (sharingMode() === "cloud") configureCloudReceiver(provider, identity);
+      if (sharingMode() === "cloud") {
+        configureCloudReceiver(provider, identity);
+        configureCloudLedgerSync(provider, identity);
+      }
       const successMessage = `管理者として接続しました。工事：${membership.siteName}／権限：${roleLabel(membership.role)}`;
       setAdminClaimMessage(successMessage);
       setMessage(successMessage);
@@ -827,7 +847,10 @@ export function initSiteSharing() {
       await startAutomaticPhotoSync();
       if (sharingMode() === "cloud") {
         configureCloudReceiver(provider, identity);
+        configureCloudLedgerSync(provider, identity);
         await refreshCloudPhotos();
+        await syncCloudLedgers();
+        await flushCloudChanges();
       }
     }
     await renderStatus();

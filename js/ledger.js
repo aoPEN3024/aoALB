@@ -1,7 +1,8 @@
 import {
   getProjects, getPhotosByProjectUid,
-  getLedgersByProjectId, getLedger, saveLedger
+  getLedgersByProjectId, getLedger
 } from "./storage.js";
+import { saveLedgerForProject } from "./cloud/ledger-sync.js?v=20260805-ledger1";
 import { loadPhotoAsset } from "./cloud/receiver.js";
 import { effectiveClassification } from "./classification.js";
 import {
@@ -60,7 +61,7 @@ export function normalizeLedger(value) {
   const now = new Date().toISOString();
   const ledgerId = value?.ledgerId || value?.internalId || crypto.randomUUID();
   const pages = pagesFromSlots(flattenSlots(value || {}));
-  return {
+  const normalized = {
     internalId: value?.internalId || ledgerId,
     ledgerId,
     schemaVersion: LEDGER_SCHEMA_VERSION,
@@ -69,11 +70,17 @@ export function normalizeLedger(value) {
     coverKoushu: String(value?.coverKoushu || ""),
     template: PRINT_TEMPLATE,
     showCover: value?.showCover !== false,
+    viewMode: value?.viewMode === "spread" ? "spread" : "single",
     captionOverrides: normalizeCaptionOverrides(value?.captionOverrides),
     pages,
     createdAt: value?.createdAt || now,
     updatedAt: value?.updatedAt || now
   };
+  if (value?.cloud && typeof value.cloud === "object" && !Array.isArray(value.cloud)) {
+    normalized.cloud = clone(value.cloud);
+  }
+  if (typeof value?.syncStatus === "string") normalized.syncStatus = value.syncStatus;
+  return normalized;
 }
 
 export function createLedger(projectId, title = "施工状況写真") {
@@ -605,7 +612,7 @@ export function initLedgerEditor() {
         assertUniquePhotos(transformed);
         transformed.updatedAt = new Date().toISOString();
         currentLedger = transformed;
-        await saveLedger(transformed);
+        transformed = await saveLedgerForProject(transformed, currentProject, photos);
         if (currentLedger?.internalId !== transformed.internalId || currentProject?.internalId !== transformed.projectId) return true;
         const listIndex = ledgers.findIndex(item => item.internalId === transformed.internalId);
         if (listIndex >= 0) ledgers[listIndex] = clone(transformed);
@@ -635,6 +642,7 @@ export function initLedgerEditor() {
     photos = currentProject ? await getPhotosByProjectUid(currentProject.projectUid) : [];
     ledgers = currentProject ? (await getLedgersByProjectId(currentProject.internalId)).map(normalizeLedger) : [];
     currentLedger = preferredLedgerId ? ledgers.find(item => item.internalId === preferredLedgerId) || null : ledgers[0] || null;
+    if (currentLedger?.viewMode) viewMode = currentLedger.viewMode;
     selectedPhotoId = "";
     selectedSlotIndex = -1;
     setupFilters();
@@ -667,6 +675,7 @@ export function initLedgerEditor() {
     if (ui.select.value) localStorage.setItem(LEDGER_SELECT_KEY, ui.select.value);
     else localStorage.removeItem(LEDGER_SELECT_KEY);
     currentLedger = ui.select.value ? normalizeLedger(await getLedger(ui.select.value)) : null;
+    if (currentLedger?.viewMode) viewMode = currentLedger.viewMode;
     selectedPhotoId = "";
     selectedSlotIndex = -1;
     await renderAll();
@@ -675,9 +684,9 @@ export function initLedgerEditor() {
     if (!currentProject) return status("先に工事を選択してください。", true);
     const ledger = createLedger(currentProject.internalId);
     try {
-      await saveLedger(ledger);
-      ledgers.push(ledger);
-      currentLedger = ledger;
+      const saved = await saveLedgerForProject(ledger, currentProject, photos);
+      ledgers.push(saved);
+      currentLedger = saved;
       await renderAll();
       status("新しい台帳を作成しました。");
     } catch (error) {
@@ -700,6 +709,7 @@ export function initLedgerEditor() {
       viewMode = control.value === "spread" ? "spread" : "single";
       localStorage.setItem(LEDGER_VIEW_KEY, viewMode);
       applyViewMode();
+      if (currentLedger) mutate(ledger => { ledger.viewMode = viewMode; return ledger; }, { preserveSelection: true });
     });
   }
   if (narrowScreen.addEventListener) narrowScreen.addEventListener("change", applyViewMode);
@@ -768,6 +778,14 @@ export function initLedgerEditor() {
   });
   ui.captionDialog.addEventListener("cancel", event => { event.preventDefault(); closeCaptionEditor(); });
   applyViewMode();
+  window.addEventListener("aoalb:ledger-sync-status", event => {
+    if (!active) return;
+    const detail = event.detail || {};
+    if (detail.conflicts) status(`別の端末の変更との競合が${detail.conflicts}件あります。工事共有画面で確認してください。`, true);
+    else if (detail.errors) status(`クラウドへ送れない変更が${detail.errors}件あります。端末内には保存されています。`, true);
+    else if (detail.pending) status("この端末へ保存しました。クラウドへ送信しています…");
+    else if (detail.synced) status("クラウドへ保存しました。");
+  });
   window.addEventListener("beforeunload", () => { stopPreviewObserver(); releaseUrls(previewUrls); clearLibraryUrls(); });
 
   return { activate, deactivate, get active() { return active; } };

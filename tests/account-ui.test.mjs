@@ -16,6 +16,8 @@ assert.match(provider, /resetPasswordForEmail/);
 assert.match(account, /clearSharedDeviceData/);
 assert.match(account, /localStorage\.setItem\(MODE_KEY, "local"\)/);
 assert.match(provider, /exchangeCodeForSession\(code\)/);
+const callbackFunction = provider.slice(provider.indexOf("async consumeAuthCallback"), provider.indexOf("async getAccountSession"));
+assert.doesNotMatch(callbackFunction, /current\.session|refreshSession/);
 assert.match(provider, /detectSessionInUrl: false/);
 assert.match(provider, /data\.session\.user\.is_anonymous === true/);
 assert.match(provider, /await client\.auth\.refreshSession\(\)/);
@@ -43,11 +45,11 @@ assert.equal(
 for (const source of [account, sharing, app, html]) {
   assert.doesNotMatch(source, /v=20260731-photo-delete2/);
 }
-assert.match(account, /supabase-provider\.js\?v=20260810-account-auth2/);
-assert.match(sharing, /supabase-provider\.js\?v=20260810-account-auth2/);
-assert.match(app, /sharing\.js\?v=20260810-account-auth2/);
-assert.match(app, /account\.js\?v=20260810-account-auth2/);
-assert.match(html, /app\.js\?v=20260810-account-auth2/);
+assert.match(account, /supabase-provider\.js\?v=20260813-account-auth4/);
+assert.match(sharing, /supabase-provider\.js\?v=20260813-account-auth4/);
+assert.match(app, /sharing\.js\?v=20260813-account-auth4/);
+assert.match(app, /account\.js\?v=20260813-account-auth4/);
+assert.match(html, /app\.js\?v=20260813-account-auth4/);
 assert.match(html, /id="sharing-admin-claim-message"/);
 assert.match(sharing, /管理者として接続しました。工事：\$\{membership\.siteName\}／権限：\$\{roleLabel\(membership\.role\)\}/);
 assert.match(sharing, /const safeMessage = \/15分\|しばらく待って\/i/);

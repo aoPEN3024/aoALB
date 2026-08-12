@@ -35,11 +35,10 @@ async function buildSupabaseProvider(config) {
       const callbackUrl = new URL(url, location.origin);
       const code = callbackUrl.searchParams.get("code");
       if (!code) return false;
-      const { data: current, error: currentError } = await client.auth.getSession();
-      if (currentError) throw currentError;
-      const result = current.session
-        ? await client.auth.refreshSession()
-        : await client.auth.exchangeCodeForSession(code);
+      // A recovery or confirmation code represents the session selected by
+      // the email link. Always exchange it, even when this browser still has
+      // an older anonymous or signed-in session.
+      const result = await client.auth.exchangeCodeForSession(code);
       const { error } = result;
       if (error) throw error;
       return true;

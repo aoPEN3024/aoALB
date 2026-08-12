@@ -2,7 +2,7 @@ import { loadCloudConfig, loadLocalCloudConfig, saveCloudConfig } from "./cloud/
 import { MockSiteProvider } from "./cloud/mock-provider.js";
 import { detectNetworkStatus, formatTransferBytes, networkLabel, NETWORK_STATUS, shouldAutoSync } from "./cloud/network.js";
 import { classifyPhotoSyncError, createPhotoPackage } from "./cloud/photo-sync.js";
-import { createSupabaseProvider } from "./cloud/supabase-provider.js?v=20260805-account-common1";
+import { createSupabaseProvider } from "./cloud/supabase-provider.js?v=20260810-account-auth2";
 import {
   cacheAllOriginals, clearCurrentSiteCloudCache, cloudDownloadSummary,
   configureCloudReceiver, disconnectCloudReceiver, syncCloudPhotos
@@ -43,6 +43,7 @@ export function initSiteSharing() {
     joinForm: byId("sharing-join-form"), siteCode: byId("sharing-site-code"), joinCode: byId("sharing-join-code"),
     adminClaimForm: byId("sharing-admin-claim-form"), adminClaimSiteCode: byId("sharing-admin-claim-site-code"),
     adminClaimCode: byId("sharing-admin-claim-code"), adminClaimDevice: byId("sharing-admin-claim-device"),
+    adminClaimMessage: byId("sharing-admin-claim-message"),
     sitesPanel: byId("sharing-site-list-panel"), sites: byId("sharing-site-list"),
     sitesEmpty: byId("sharing-site-list-empty"), nonAdminNote: byId("sharing-non-admin-note"),
     openAdminClaim: byId("sharing-open-admin-claim"), adminCodeUnavailable: byId("sharing-admin-code-unavailable"),
@@ -108,6 +109,11 @@ export function initSiteSharing() {
     } catch (_) {
       return false;
     }
+  }
+
+  function setAdminClaimMessage(message, error = false) {
+    ui.adminClaimMessage.textContent = message;
+    ui.adminClaimMessage.classList.toggle("error", error);
   }
 
   async function ensureMembershipAuth() {
@@ -631,9 +637,13 @@ export function initSiteSharing() {
   });
   ui.adminClaimForm.addEventListener("submit", async event => {
     event.preventDefault();
-    if (!provider?.claimSiteAdmin) return setMessage("先に工事の共有を開始してください。", true);
+    if (!provider?.claimSiteAdmin) {
+      setAdminClaimMessage("先に工事の共有を開始してください。", true);
+      return setMessage("先に工事の共有を開始してください。", true);
+    }
     if (siteSwitching) return;
     siteSwitching = true;
+    setAdminClaimMessage("管理者として確認しています…");
     try {
       await ensureMembershipAuth();
       const membership = await provider.claimSiteAdmin({
@@ -646,9 +656,14 @@ export function initSiteSharing() {
       await saveCloudIdentity(identity);
       subscribeCurrentSite();
       if (sharingMode() === "cloud") configureCloudReceiver(provider, identity);
-      setMessage("管理者として接続しました。");
+      const successMessage = `管理者として接続しました。工事：${membership.siteName}／権限：${roleLabel(membership.role)}`;
+      setAdminClaimMessage(successMessage);
+      setMessage(successMessage);
     } catch (error) {
-      setMessage(error?.message || "管理者PASSが違うか、現在利用できません。", true);
+      const safeMessage = /15分|しばらく待って/i.test(error?.message || "")
+        ? error.message : "管理者PASSが違うか、現在利用できません。";
+      setAdminClaimMessage(safeMessage, true);
+      setMessage(safeMessage, true);
     } finally {
       ui.adminClaimCode.value = "";
       siteSwitching = false;
@@ -658,6 +673,7 @@ export function initSiteSharing() {
   ui.openAdminClaim.addEventListener("click", () => {
     ui.adminClaimSiteCode.value = identity?.siteCode || "";
     ui.adminClaimDevice.value = identity?.deviceName || "";
+    setAdminClaimMessage("");
     ui.adminClaimCode.focus();
   });
   document.querySelectorAll("[data-site-status]").forEach(button => button.addEventListener("click", () => {

@@ -41,11 +41,14 @@ assert.equal(
 for (const source of [account, sharing, app, html]) {
   assert.doesNotMatch(source, /v=20260731-photo-delete2/);
 }
-assert.match(account, /supabase-provider\.js\?v=20260805-account-common1/);
-assert.match(sharing, /supabase-provider\.js\?v=20260805-account-common1/);
-assert.match(app, /sharing\.js\?v=20260805-account-common1/);
-assert.match(app, /account\.js\?v=20260805-account-common1/);
-assert.match(html, /app\.js\?v=20260805-account-common1/);
+assert.match(account, /supabase-provider\.js\?v=20260810-account-auth2/);
+assert.match(sharing, /supabase-provider\.js\?v=20260810-account-auth2/);
+assert.match(app, /sharing\.js\?v=20260810-account-auth2/);
+assert.match(app, /account\.js\?v=20260810-account-auth2/);
+assert.match(html, /app\.js\?v=20260810-account-auth2/);
+assert.match(html, /id="sharing-admin-claim-message"/);
+assert.match(sharing, /管理者として接続しました。工事：\$\{membership\.siteName\}／権限：\$\{roleLabel\(membership\.role\)\}/);
+assert.match(sharing, /const safeMessage = \/15分\|しばらく待って\/i/);
 assert.match(authUrlGuide, /Site URL: `https:\/\/aopen3024\.github\.io\/aoALB\/`/);
 assert.match(authUrlGuide, /Redirect URL: `https:\/\/aopen3024\.github\.io\/aoALB\/`/);
 assert.match(storage, /db\.transaction\(stores, "readwrite"\)/);

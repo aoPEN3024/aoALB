@@ -126,6 +126,71 @@ export async function saveLedger(ledger) {
   }
 }
 
+export async function clearSharedDeviceData() {
+  const db = await openDatabase();
+  const stores = ["projects", "photos", "cloudFiles", "ledgers", "settings"];
+  const tx = db.transaction(stores, "readwrite");
+  const done = transactionDone(tx);
+  const stats = { projects: 0, photos: 0, files: 0, ledgers: 0 };
+  try {
+    const projectStore = tx.objectStore("projects");
+    const photoStore = tx.objectStore("photos");
+    const ledgerStore = tx.objectStore("ledgers");
+    const cloudFileStore = tx.objectStore("cloudFiles");
+    const settingStore = tx.objectStore("settings");
+    const [projects, photos, ledgers, files] = await Promise.all([
+      requestResult(projectStore.getAll()), requestResult(photoStore.getAll()),
+      requestResult(ledgerStore.getAll()), requestResult(cloudFileStore.getAll())
+    ]);
+    const cloudProjectIds = new Set();
+    for (const project of projects) {
+      const sources = new Set(project.sources || [project.source || "zip"]);
+      if (!sources.has("cloud") && !project.siteId) continue;
+      if (sources.has("zip")) {
+        sources.delete("cloud");
+        const local = { ...project, source: "zip", sources: [...sources] };
+        delete local.siteId; delete local.cloud; delete local.lastCloudSyncedAt;
+        projectStore.put(local);
+      } else {
+        cloudProjectIds.add(project.internalId);
+        projectStore.delete(project.internalId); stats.projects += 1;
+      }
+    }
+    for (const photo of photos) {
+      const sources = new Set(photo.sources || [photo.source || "zip"]);
+      if (!sources.has("cloud") && !photo.cloud) continue;
+      if (sources.has("zip")) {
+        sources.delete("cloud");
+        const local = { ...photo, source: "zip", sources: [...sources] };
+        delete local.cloud; delete local.cloudSyncedAt;
+        photoStore.put(local);
+      } else {
+        photoStore.delete(photo.internalId); stats.photos += 1;
+      }
+    }
+    for (const ledger of ledgers) {
+      if (!ledger.cloud && !cloudProjectIds.has(ledger.projectId)) continue;
+      if (ledger.sources?.includes("zip")) {
+        const local = { ...ledger, sources: ledger.sources.filter(value => value !== "cloud") };
+        delete local.cloud;
+        ledgerStore.put(local);
+      } else {
+        ledgerStore.delete(ledger.internalId); stats.ledgers += 1;
+      }
+    }
+    for (const file of files) { cloudFileStore.delete(file.cacheKey); stats.files += 1; }
+    for (const key of ["cloud:identity", "cloud:syncQueue", "cloud:photoSyncQueue", "cloud:photoSyncSettings"]) {
+      settingStore.delete(key);
+    }
+    await done;
+    return stats;
+  } catch (error) {
+    try { tx.abort(); } catch (_) { /* completed or aborted */ }
+    await done.catch(() => {});
+    throw error;
+  }
+}
+
 const STORAGE_BASE_RESERVE = 8 * 1024 * 1024;
 const STORAGE_METADATA_MINIMUM = 512 * 1024;
 

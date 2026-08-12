@@ -16,11 +16,11 @@ function deviceUid() {
 }
 
 function redirectUrl(authAction = "") {
-  // Keep authentication callbacks on the current app origin and path, but do
-  // not carry arbitrary verification/test query parameters into email links.
+  // Keep authentication callbacks on the current app origin and path. The
+  // fragment is restored after the callback instead of being included in the
+  // Supabase allow-list comparison.
   const url = new URL(location.pathname || "/", location.origin);
   if (authAction) url.searchParams.set("authAction", authAction);
-  url.hash = "sharing";
   return url.href;
 }
 

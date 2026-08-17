@@ -25,15 +25,15 @@ assert.match(provider, /async updatePassword\(password, \{ allowAlreadySet = fal
 assert.match(provider, /allowAlreadySet && error\.code === "same_password"/);
 assert.match(sharing, /async function ensureMembershipAuth\(\)[\s\S]*authenticate\(\{ allowAnonymous: true \}\)/);
 assert.equal((sharing.match(/await ensureMembershipAuth\(\);/g) || []).length, 2);
-assert.match(account, /searchParams\.delete\("code"\)/);
+assert.match(account, /AUTH_CALLBACK_PARAMS\.forEach\(name => url\.searchParams\.delete\(name\)\)/);
 assert.match(account, /redirectUrl\("recovery"\)/);
 assert.match(account, /new URL\(location\.pathname \|\| "\/", location\.origin\)/);
 const redirectFunction = account.slice(account.indexOf("function redirectUrl"), account.indexOf("function clearAuthCallbackUrl"));
 assert.doesNotMatch(redirectFunction, /new URL\(location\.href\)/);
 assert.doesNotMatch(redirectFunction, /\.hash\s*=/);
 assert.match(redirectFunction, /searchParams\.set\("authAction", authAction\)/);
-assert.match(account, /searchParams\.get\("authAction"\) === PASSWORD_MODE_RECOVERY[\s\S]*localStorage\.setItem\(PENDING_PASSWORD_KEY, PASSWORD_MODE_RECOVERY\)/);
-assert.match(account, /searchParams\.delete\("authAction"\)/);
+assert.match(account, /const authAction = callbackUrl\.searchParams\.get\("authAction"\)[\s\S]*authAction === PASSWORD_MODE_RECOVERY[\s\S]*localStorage\.setItem\(PENDING_PASSWORD_KEY, PASSWORD_MODE_RECOVERY\)/);
+assert.match(account, /"error_description"[\s\S]*"authAction"/);
 assert.match(account, /PASSWORD_MODE_UPGRADE/);
 assert.match(account, /PASSWORD_MODE_RECOVERY/);
 assert.match(account, /\["1", PASSWORD_MODE_UPGRADE, PASSWORD_MODE_RECOVERY\]\.includes\(pendingPasswordMode\)/);
@@ -45,11 +45,11 @@ assert.equal(
 for (const source of [account, sharing, app, html]) {
   assert.doesNotMatch(source, /v=20260731-photo-delete2/);
 }
-assert.match(account, /supabase-provider\.js\?v=20260813-account-auth4/);
-assert.match(sharing, /supabase-provider\.js\?v=20260813-account-auth4/);
-assert.match(app, /sharing\.js\?v=20260813-account-auth4/);
-assert.match(app, /account\.js\?v=20260813-account-auth4/);
-assert.match(html, /app\.js\?v=20260813-account-auth4/);
+assert.match(account, /supabase-provider\.js\?v=20260817-auth-guidance1/);
+assert.match(sharing, /supabase-provider\.js\?v=20260817-auth-guidance1/);
+assert.match(app, /sharing\.js\?v=20260817-auth-guidance1/);
+assert.match(app, /account\.js\?v=20260817-auth-guidance1/);
+assert.match(html, /app\.js\?v=20260817-auth-guidance1/);
 assert.match(html, /id="sharing-admin-claim-message"/);
 assert.match(sharing, /管理者として接続しました。工事：\$\{membership\.siteName\}／権限：\$\{roleLabel\(membership\.role\)\}/);
 assert.match(sharing, /const safeMessage = \/15分\|しばらく待って\/i/);
@@ -57,8 +57,18 @@ assert.match(authUrlGuide, /Site URL: `https:\/\/aopen3024\.github\.io\/aoALB\/`
 assert.match(authUrlGuide, /Redirect URL: `https:\/\/aopen3024\.github\.io\/aoALB\/`/);
 assert.match(storage, /db\.transaction\(stores, "readwrite"\)/);
 assert.match(storage, /sources\.has\("zip"\)/);
-for (const id of ["account-login-form", "account-signup-form", "account-upgrade-form", "account-reset-form", "account-clear-device"]) {
+for (const id of ["account-login-form", "account-signup-form", "account-upgrade-form", "account-reset-form", "account-clear-device", "account-auth-recovery"]) {
   assert.match(html, new RegExp(`id="${id}"`));
 }
+assert.match(account, /classifyAuthFailure/);
+assert.match(account, /AUTH_CALLBACK_PARAMS\.forEach/);
+assert.match(account, /このメールを送ったブラウザで、最新のメールにあるリンクを開いてください/);
+assert.match(account, /このリンクは使用済み、または有効期限が切れています/);
+assert.match(account, /このブラウザには、引き継げる利用情報がありません/);
+assert.match(account, /Array\.isArray\(memberships\) && memberships\.length > 0/);
+assert.match(account, /querySelectorAll\('input\[type="password"\]'\)/);
+assert.match(sharing, /clearSharingSecrets/);
+assert.match(sharing, /finally \{[\s\S]*clearSharingSecrets\(ui\.adminJoinCode, ui\.adminJoinConfirm\)/);
+assert.doesNotMatch(account, /console\.(log|error|warn)/);
 assert.doesNotMatch(account, /service_role|sb_secret_|access_token|refresh_token/i);
 console.log("account UI static checks passed");

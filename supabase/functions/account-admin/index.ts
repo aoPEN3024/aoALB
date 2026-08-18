@@ -133,6 +133,19 @@ async function findUserByEmail(email: string) {
   throw new Error("auth_list_limit_reached");
 }
 
+async function findUserByInvitationOperation(operationId: string) {
+  for (let page = 1; page <= 10; page += 1) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 100 });
+    if (error) throw new Error("auth_list_failed");
+    const match = data.users.find((user) =>
+      String(user.user_metadata?.aoalb_invitation_operation_id || "") === operationId
+    );
+    if (match) return match;
+    if (data.users.length < 100) return null;
+  }
+  throw new Error("auth_list_limit_reached");
+}
+
 async function completeInvitation(actorId: string, operationId: string) {
   const { data, error } = await admin.rpc("admin_complete_account_invitation", {
     p_actor_user_id: actorId,
@@ -146,26 +159,29 @@ async function completeInvitation(actorId: string, operationId: string) {
 async function listInvitationRecovery() {
   const { data, error } = await admin.from("account_invitation_operations")
     .select("operation_id,auth_user_id,display_name,status,last_error_code,created_at,updated_at")
-    .in("status", ["auth_created", "recovery_required", "manual_review"])
+    .in("status", ["requested", "auth_created", "recovery_required", "manual_review"])
     .order("updated_at", { ascending: false }).limit(100);
   if (error) throw new Error("invitation_recovery_list_failed");
   const rows = [];
   for (const row of data ?? []) {
+    const discoveredUser = row.auth_user_id ? null : await findUserByInvitationOperation(row.operation_id);
+    if (row.status === "requested" && !discoveredUser) continue;
+    const targetUserId = row.auth_user_id || discoveredUser?.id || null;
     let email = "";
-    if (row.auth_user_id) {
-      const result = await admin.auth.admin.getUserById(row.auth_user_id);
+    if (targetUserId) {
+      const result = discoveredUser ? { data: { user: discoveredUser } } : await admin.auth.admin.getUserById(targetUserId);
       email = result.data.user?.email ?? "";
     }
     rows.push({
       operationId: row.operation_id,
-      targetUserId: row.auth_user_id,
+      targetUserId,
       displayName: row.display_name,
       email,
       status: row.status,
       reasonCode: row.last_error_code,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
-      automaticallyRecoverable: row.status !== "manual_review" && Boolean(row.auth_user_id),
+      automaticallyRecoverable: row.status !== "manual_review" && Boolean(targetUserId),
     });
   }
   return rows;
@@ -302,6 +318,17 @@ Deno.serve(async (request: Request) => {
     if (action === "retry_invitation") {
       const operationId = safeText(input.operationId, 36);
       if (!validUuid(operationId)) return response(origin, 400, { ok: false, error: "invalid_input" });
+      const { data: operation, error: operationError } = await admin.from("account_invitation_operations")
+        .select("auth_user_id,status").eq("operation_id", operationId).maybeSingle();
+      if (operationError || !operation) throw new Error("invitation_operation_failed");
+      if (!operation.auth_user_id) {
+        const discoveredUser = await findUserByInvitationOperation(operationId);
+        if (!discoveredUser) throw new Error("invitation_recovery_needs_review");
+        const recorded = await admin.rpc("admin_record_invitation_auth_user", {
+          p_actor_user_id: actor.id, p_operation_id: operationId, p_auth_user_id: discoveredUser.id,
+        });
+        if (recorded.error) throw new Error("invitation_auth_unverified");
+      }
       const result = await completeInvitation(actor.id, operationId);
       return response(origin, 200, { ok: true, recovered: true, targetUserId: result.target_user_id });
     }

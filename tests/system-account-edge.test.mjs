@@ -15,6 +15,8 @@ assert.match(edge, /aoalb_invitation_operation_id/);
 assert.match(edge, /list_invitation_recovery/);
 assert.match(edge, /retry_invitation/);
 assert.match(edge, /existingOperationId === operationId/);
+assert.match(edge, /findUserByInvitationOperation/);
+assert.match(edge, /row\.status === "requested" && !discoveredUser/);
 assert.match(edge, /invitation_recovery_needs_review/);
 assert.doesNotMatch(edge, /admin\.auth\.admin\.deleteUser/);
 assert.match(edge, /invite_profile_failed/);

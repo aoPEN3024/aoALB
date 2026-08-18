@@ -145,6 +145,16 @@
           <p id="account-state">確認しています…</p>
           <p class="limit-note">ログインすると、同じアカウントを使うPC・スマートフォン・PWAで共有工事を利用できます。ZIP取込みだけならログインは不要です。</p>
           <p id="account-message" class="sharing-message" role="status" aria-live="polite"></p>
+          <p id="account-session-guide" class="limit-note" hidden></p>
+          <section id="account-auth-recovery" class="account-auth-recovery" hidden aria-labelledby="account-auth-recovery-title">
+            <h3 id="account-auth-recovery-title">メールの確認をやり直す</h3>
+            <p id="account-auth-recovery-message"></p>
+            <div class="actions">
+              <button id="account-resend-confirmation" type="button" class="secondary" hidden>確認メールをもう一度送る</button>
+              <button id="account-resend-password" type="button" class="secondary" hidden>パスワード再設定メールをもう一度送る</button>
+              <button id="account-back-to-login" type="button" class="secondary">ログイン画面へ戻る</button>
+            </div>
+          </section>
           <div class="account-forms">
             <form id="account-login-form" class="sharing-form account-form">
               <h3>ログイン</h3>
@@ -162,8 +172,8 @@
               <button type="submit" class="secondary">作成</button>
             </form>
             <form id="account-upgrade-form" class="sharing-form account-form" hidden>
-              <h3>現在の工事をアカウントへ引き継ぐ</h3>
-              <p class="limit-note">現在の工事・写真・権限を維持したままメール登録します。</p>
+              <h3 id="account-upgrade-title">この端末の利用情報をアカウントへ引き継ぐ</h3>
+              <p id="account-upgrade-note" class="limit-note">現在このブラウザで利用している工事の所属と権限を、同じ利用者のままアカウントへ変更します。</p>
               <label>表示名<input name="displayName" type="text" required maxlength="80"></label>
               <label>メールアドレス<input name="email" type="email" required autocomplete="email"></label>
               <button type="submit" class="primary">確認メールを送る</button>
@@ -212,7 +222,7 @@
           <h2>工事に参加する</h2>
           <form id="sharing-join-form" class="sharing-form sharing-join-form">
             <label>工事ID<input id="sharing-site-code" type="text" maxlength="40" autocomplete="off" placeholder="KUKI-A-2026"></label>
-            <label>工事PASS<input id="sharing-join-code" type="password" maxlength="72" autocomplete="one-time-code"></label>
+            <label>工事PASS<input id="sharing-join-code" type="password" maxlength="72" autocomplete="off"></label>
             <details class="friendly-details"><summary>端末名を変更</summary><label>端末名<input id="sharing-device-name" type="text" maxlength="80" placeholder="事務所PC"></label></details>
             <button id="sharing-join" type="submit" class="primary">工事に参加</button>
           </form>
@@ -228,7 +238,7 @@
           <p class="limit-note">工事ごとの管理者PASSを使います。一般社員用の工事PASSや、会社共通の会社PASSとは異なります。</p>
           <form id="sharing-admin-claim-form" class="sharing-form sharing-join-form">
             <label>工事ID<input id="sharing-admin-claim-site-code" type="text" maxlength="40" autocomplete="off" placeholder="KUKI-A-2026"></label>
-            <label>管理者PASS<input id="sharing-admin-claim-code" type="password" minlength="8" maxlength="64" autocomplete="one-time-code"></label>
+            <label>管理者PASS<input id="sharing-admin-claim-code" type="password" minlength="8" maxlength="64" autocomplete="off"></label>
             <label>この端末の名前<input id="sharing-admin-claim-device" type="text" maxlength="80" placeholder="事務所PC"></label>
             <button type="submit" class="primary">管理者として入る</button>
           </form>
@@ -332,15 +342,15 @@
           <div class="sharing-actions"><button id="sharing-admin-save" type="button" class="secondary">工事情報を保存</button></div>
           <details class="friendly-details"><summary>工事PASSを変更</summary>
             <p class="limit-note">旧コードは無効になります。参加済みの端末は継続利用できます。</p>
-            <label>新しい工事PASS<input id="sharing-admin-join-code" type="password" minlength="8" maxlength="64"></label>
-            <label>確認入力<input id="sharing-admin-join-code-confirm" type="password" minlength="8" maxlength="64"></label>
+            <label>新しい工事PASS<input id="sharing-admin-join-code" type="password" minlength="8" maxlength="64" autocomplete="off"></label>
+            <label>確認入力<input id="sharing-admin-join-code-confirm" type="password" minlength="8" maxlength="64" autocomplete="off"></label>
             <button id="sharing-admin-rotate" type="button" class="secondary">工事PASSを変更</button>
           </details>
           <details class="friendly-details" open>
             <summary>管理者PASS</summary>
             <p id="sharing-admin-code-status" class="limit-note"></p>
-            <label>新しい管理者PASS<input id="sharing-admin-access-code" type="password" minlength="8" maxlength="64" autocomplete="new-password"></label>
-            <label>確認入力<input id="sharing-admin-access-confirm" type="password" minlength="8" maxlength="64" autocomplete="new-password"></label>
+            <label>新しい管理者PASS<input id="sharing-admin-access-code" type="password" minlength="8" maxlength="64" autocomplete="off"></label>
+            <label>確認入力<input id="sharing-admin-access-confirm" type="password" minlength="8" maxlength="64" autocomplete="off"></label>
             <button id="sharing-admin-access-save" type="button" class="secondary">管理者PASSを設定</button>
           </details>
           <details class="friendly-details" open>
@@ -546,6 +556,6 @@
   </dialog>
 
   <script src="vendor/jszip.min.js"></script>
-  <script type="module" src="js/app.js?v=20260813-account-auth4"></script>
+  <script type="module" src="js/app.js?v=20260817-auth-guidance1"></script>
 </body>
 </html>

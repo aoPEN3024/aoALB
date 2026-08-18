@@ -2,7 +2,7 @@ import { loadCloudConfig, loadLocalCloudConfig, saveCloudConfig } from "./cloud/
 import { MockSiteProvider } from "./cloud/mock-provider.js";
 import { detectNetworkStatus, formatTransferBytes, networkLabel, NETWORK_STATUS, shouldAutoSync } from "./cloud/network.js";
 import { classifyPhotoSyncError, createPhotoPackage } from "./cloud/photo-sync.js";
-import { createSupabaseProvider } from "./cloud/supabase-provider.js?v=20260813-account-auth4";
+import { createSupabaseProvider } from "./cloud/supabase-provider.js?v=20260817-auth-guidance1";
 import {
   cacheAllOriginals, clearCurrentSiteCloudCache, cloudDownloadSummary,
   configureCloudReceiver, disconnectCloudReceiver, syncCloudPhotos
@@ -89,6 +89,11 @@ export function initSiteSharing() {
   let receiveQueued = false;
   let memberships = [];
   let siteStatusFilter = "active";
+  const sharingSecrets = [
+    ui.publishableKey, ui.joinCode, ui.adminClaimCode, ui.adminJoinCode,
+    ui.adminJoinConfirm, ui.adminAccessCode, ui.adminAccessConfirm
+  ].filter(Boolean);
+  const clearSharingSecrets = (...inputs) => inputs.flat().filter(Boolean).forEach(input => { input.value = ""; });
 
   function sharingMode() {
     const mode = localStorage.getItem(MODE_KEY);
@@ -607,7 +612,7 @@ export function initSiteSharing() {
     await startAutomaticPhotoSync();
   }
 
-  ui.local.addEventListener("click", () => connect("local"));
+  ui.local.addEventListener("click", () => { clearSharingSecrets(sharingSecrets); connect("local"); });
   ui.mock.addEventListener("click", () => connect("mock"));
   ui.configForm.addEventListener("submit", async event => {
     event.preventDefault();
@@ -693,6 +698,7 @@ export function initSiteSharing() {
   ui.openAdminClaim.addEventListener("click", () => {
     ui.adminClaimSiteCode.value = identity?.siteCode || "";
     ui.adminClaimDevice.value = identity?.deviceName || "";
+    clearSharingSecrets(ui.adminClaimCode);
     setAdminClaimMessage("");
     ui.adminClaimCode.focus();
   });
@@ -732,12 +738,14 @@ export function initSiteSharing() {
     p_name: ui.adminName.value, p_site_code: ui.adminCode.value
   })));
   ui.adminRotate.addEventListener("click", () => runAdminAction("工事PASSを変更", async () => {
-    if (!ui.adminJoinCode.value || ui.adminJoinCode.value !== ui.adminJoinConfirm.value) throw new Error("工事PASSと確認入力が一致しません。");
-    await provider.siteRpc("rotate_site_join_code", {
-      p_site_id: identity.siteId, p_new_code: ui.adminJoinCode.value, p_grant_role: "editor"
-    });
-    ui.adminJoinCode.value = "";
-    ui.adminJoinConfirm.value = "";
+    try {
+      if (!ui.adminJoinCode.value || ui.adminJoinCode.value !== ui.adminJoinConfirm.value) throw new Error("工事PASSと確認入力が一致しません。");
+      await provider.siteRpc("rotate_site_join_code", {
+        p_site_id: identity.siteId, p_new_code: ui.adminJoinCode.value, p_grant_role: "editor"
+      });
+    } finally {
+      clearSharingSecrets(ui.adminJoinCode, ui.adminJoinConfirm);
+    }
   }));
   ui.adminAccessSave.addEventListener("click", () => runAdminAction(
     identity?.adminCodeConfigured ? "管理者PASSを変更" : "管理者PASSを設定",
@@ -790,6 +798,11 @@ export function initSiteSharing() {
       return { skipRefresh: true };
     });
   });
+  document.querySelectorAll(".friendly-details").forEach(details => details.addEventListener("toggle", () => {
+    if (!details.open) clearSharingSecrets(...details.querySelectorAll('input[type="password"]'));
+  }));
+  document.querySelectorAll("[data-view]").forEach(button => button.addEventListener("click", () => clearSharingSecrets(sharingSecrets)));
+  window.addEventListener("pagehide", () => clearSharingSecrets(sharingSecrets));
   ui.receiveRefresh.addEventListener("click", () => refreshCloudPhotos());
   ui.receiveCache.addEventListener("click", () => cacheOriginals(true));
   ui.receiveMode.addEventListener("change", async () => {

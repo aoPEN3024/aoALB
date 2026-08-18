@@ -6,11 +6,12 @@ import {
   getPhotoDeletionPreview, deleteLocalPhotos, updatePhotoClassificationOverrides
 } from "./storage.js";
 import { initLedgerEditor } from "./ledger.js";
-import { initSiteSharing } from "./sharing.js?v=20260817-auth-guidance1";
+import { initSiteSharing } from "./sharing.js?v=20260818-invite-admin1";
 import { loadPhotoAsset, syncCloudTrash } from "./cloud/receiver.js";
 import { photoDeleteConfirmation, photoSourceKind } from "./photo-delete.js";
 import { CLASSIFICATION_FIELDS, effectiveClassification, hasClassificationOverride } from "./classification.js";
-import { initAccountUI } from "./account.js?v=20260817-auth-guidance1";
+import { initAccountUI } from "./account.js?v=20260818-invite-admin1";
+import { initSystemAdminUI } from "./system-admin.js?v=20260818-invite-admin1";
 import { initCloudLedgerSyncUI } from "./cloud/ledger-sync.js?v=20260805-ledger1";
 
 const views = ["import", "projects", "photos", "ledgers", "history", "sharing"];
@@ -26,6 +27,7 @@ const thumbnailUrls = new Set();
 let ledgerEditor = null;
 let sharingController = null;
 let accountController = null;
+let systemAdminController = null;
 let cloudLedgerSyncUI = null;
 let projectDeletionPreview = null;
 let deletingProject = false;
@@ -1025,6 +1027,7 @@ try {
   await openDatabase();
   ledgerEditor = initLedgerEditor();
   sharingController = initSiteSharing();
+  systemAdminController = initSystemAdminUI();
   accountController = initAccountUI();
   cloudLedgerSyncUI = initCloudLedgerSyncUI();
   await accountController.start();

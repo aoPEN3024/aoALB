@@ -69,14 +69,6 @@ async function buildSupabaseProvider(config) {
         displayName: String(data.user.user_metadata?.display_name || "")
       };
     },
-    async signUpWithPassword({ email, password, displayName, redirectTo }) {
-      const { data, error } = await client.auth.signUp({
-        email, password,
-        options: { emailRedirectTo: redirectTo, data: { display_name: displayName } }
-      });
-      if (error) throw error;
-      return { userId: data.user?.id || "", confirmationRequired: !data.session };
-    },
     async requestPasswordReset({ email, redirectTo }) {
       const { error } = await client.auth.resetPasswordForEmail(email, { redirectTo });
       if (error) throw error;
@@ -93,15 +85,20 @@ async function buildSupabaseProvider(config) {
       if (refreshError) throw refreshError;
       return refreshed.user || data?.user;
     },
-    async beginAnonymousUpgrade({ email, displayName, redirectTo }) {
-      const current = await this.getAccountSession();
-      if (!current?.anonymous) throw new Error("匿名利用中の端末だけを昇格できます。");
-      const { data, error } = await client.auth.updateUser(
-        { email, data: { display_name: displayName } },
-        { emailRedirectTo: redirectTo }
-      );
+    async getAccountContext() {
+      const { data, error } = await client.rpc("get_my_account_context");
       if (error) throw error;
-      return data.user;
+      const row = Array.isArray(data) ? data[0] : data;
+      return row ? {
+        userId: row.user_id, displayName: row.display_name,
+        status: row.account_status, systemAdmin: row.system_admin === true,
+        lastSeenAt: row.last_seen_at
+      } : null;
+    },
+    async activateInvitedAccount(displayName) {
+      const { data, error } = await client.rpc("activate_my_invited_account", { p_display_name: displayName });
+      if (error) throw error;
+      return Array.isArray(data) ? data[0] : data;
     },
     async ensureAccountProfile({ displayName, deviceUid, deviceName }) {
       const profileResult = await client.rpc("ensure_my_profile", { p_display_name: displayName });
@@ -116,6 +113,26 @@ async function buildSupabaseProvider(config) {
       const { data, error } = await client.rpc("list_my_account_devices");
       if (error) throw error;
       return data || [];
+    },
+    async invokeAccountAdmin(payload) {
+      const { data: sessionData, error: sessionError } = await client.auth.getSession();
+      if (sessionError || !sessionData.session?.access_token) throw new Error("ログインを確認できません。");
+      const result = await fetch(`${config.projectUrl}/functions/v1/account-admin`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${sessionData.session.access_token}`,
+          "apikey": config.publishableKey
+        },
+        body: JSON.stringify(payload), cache: "no-store"
+      });
+      const body = await result.json().catch(() => ({}));
+      if (!result.ok || !body.ok) {
+        const error = new Error(String(body.error || "operation_failed"));
+        error.code = String(body.error || "operation_failed");
+        throw error;
+      }
+      return body;
     },
     onAuthStateChange(callback) {
       const { data } = client.auth.onAuthStateChange((event, session) => callback(event, session));
@@ -169,6 +186,25 @@ async function buildSupabaseProvider(config) {
         throw new Error("工事IDまたは工事PASSが正しくありません。");
       }
       return { siteId: row.site_id, siteCode: row.site_code, siteName: row.site_name, role: row.member_role, deviceName };
+    },
+    async createSiteForAccount({ siteName, siteCode, joinCode, adminCode, deviceName }) {
+      const { data, error } = await client.rpc("create_site_for_account", {
+        p_site_name: siteName, p_site_code: siteCode, p_site_join_code: joinCode,
+        p_site_admin_code: adminCode, p_device_name: deviceName
+      });
+      if (error) throw error;
+      const row = Array.isArray(data) ? data[0] : data;
+      if (!row?.site_id) {
+        if (row?.error_code === "site_code_exists") throw new Error("この工事IDは既に使われています。");
+        if (row?.error_code === "temporarily_blocked") throw new Error("作成回数が上限に達しました。しばらく待ってお試しください。");
+        if (row?.error_code === "account_unavailable") throw new Error("有効なアカウントでログインしてください。");
+        throw new Error("入力内容を確認してください。");
+      }
+      return {
+        siteId: row.site_id, siteCode: row.site_code, siteName: row.site_name,
+        role: row.member_role, adminCodeConfigured: row.admin_code_configured === true,
+        deviceName, siteStatus: "active", siteRevision: 1
+      };
     },
     async claimSiteAdmin({ siteCode, adminCode, deviceName }) {
       const { data, error } = await client.rpc("claim_site_admin", {

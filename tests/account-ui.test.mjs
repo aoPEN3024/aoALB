@@ -6,12 +6,13 @@ const account = readFileSync(new URL("../js/account.js", import.meta.url), "utf8
 const sharing = readFileSync(new URL("../js/sharing.js", import.meta.url), "utf8");
 const storage = readFileSync(new URL("../js/storage.js", import.meta.url), "utf8");
 const app = readFileSync(new URL("../js/app.js", import.meta.url), "utf8");
+const systemAdmin = readFileSync(new URL("../js/system-admin.js", import.meta.url), "utf8");
 const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
 const authUrlGuide = readFileSync(new URL("../docs/auth-production-url.md", import.meta.url), "utf8");
 
 assert.match(provider, /persistSession:\s*true/);
 assert.match(provider, /flowType:\s*"pkce"/);
-assert.match(provider, /updateUser\([\s\S]*email/);
+assert.doesNotMatch(provider, /signUpWithPassword|beginAnonymousUpgrade/);
 assert.match(provider, /resetPasswordForEmail/);
 assert.match(account, /clearSharedDeviceData/);
 assert.match(account, /localStorage\.setItem\(MODE_KEY, "local"\)/);
@@ -23,8 +24,8 @@ assert.match(provider, /data\.session\.user\.is_anonymous === true/);
 assert.match(provider, /await client\.auth\.refreshSession\(\)/);
 assert.match(provider, /async updatePassword\(password, \{ allowAlreadySet = false \} = \{\}\)[\s\S]*client\.auth\.refreshSession\(\)/);
 assert.match(provider, /allowAlreadySet && error\.code === "same_password"/);
-assert.match(sharing, /async function ensureMembershipAuth\(\)[\s\S]*authenticate\(\{ allowAnonymous: true \}\)/);
-assert.equal((sharing.match(/await ensureMembershipAuth\(\);/g) || []).length, 2);
+assert.match(sharing, /async function ensureMembershipAuth\(\)[\s\S]*authenticate\(\{ allowAnonymous: false \}\)/);
+assert.equal((sharing.match(/await ensureMembershipAuth\(\);/g) || []).length, 3);
 assert.match(account, /AUTH_CALLBACK_PARAMS\.forEach\(name => url\.searchParams\.delete\(name\)\)/);
 assert.match(account, /redirectUrl\("recovery"\)/);
 assert.match(account, /new URL\(location\.pathname \|\| "\/", location\.origin\)/);
@@ -34,10 +35,10 @@ assert.doesNotMatch(redirectFunction, /\.hash\s*=/);
 assert.match(redirectFunction, /searchParams\.set\("authAction", authAction\)/);
 assert.match(account, /const authAction = callbackUrl\.searchParams\.get\("authAction"\)[\s\S]*authAction === PASSWORD_MODE_RECOVERY[\s\S]*localStorage\.setItem\(PENDING_PASSWORD_KEY, PASSWORD_MODE_RECOVERY\)/);
 assert.match(account, /"error_description"[\s\S]*"authAction"/);
-assert.match(account, /PASSWORD_MODE_UPGRADE/);
 assert.match(account, /PASSWORD_MODE_RECOVERY/);
-assert.match(account, /\["1", PASSWORD_MODE_UPGRADE, PASSWORD_MODE_RECOVERY\]\.includes\(pendingPasswordMode\)/);
-assert.match(account, /allowAlreadySet: passwordMode === PASSWORD_MODE_UPGRADE \|\| passwordMode === "1"/);
+assert.match(account, /activateInvitedAccount/);
+assert.match(account, /getAccountContext/);
+assert.match(account, /allowAlreadySet: passwordMode === "1"/);
 assert.equal(
   account.match(/\.\/cloud\/supabase-provider\.js\?v=[^"']+/)?.[0],
   sharing.match(/\.\/cloud\/supabase-provider\.js\?v=[^"']+/)?.[0]
@@ -45,11 +46,12 @@ assert.equal(
 for (const source of [account, sharing, app, html]) {
   assert.doesNotMatch(source, /v=20260731-photo-delete2/);
 }
-assert.match(account, /supabase-provider\.js\?v=20260817-auth-guidance1/);
-assert.match(sharing, /supabase-provider\.js\?v=20260817-auth-guidance1/);
-assert.match(app, /sharing\.js\?v=20260817-auth-guidance1/);
-assert.match(app, /account\.js\?v=20260817-auth-guidance1/);
-assert.match(html, /app\.js\?v=20260817-auth-guidance1/);
+assert.match(account, /supabase-provider\.js\?v=20260818-invite-admin1/);
+assert.match(sharing, /supabase-provider\.js\?v=20260818-invite-admin1/);
+assert.match(app, /sharing\.js\?v=20260818-invite-admin1/);
+assert.match(app, /account\.js\?v=20260818-invite-admin1/);
+assert.match(app, /system-admin\.js\?v=20260818-invite-admin1/);
+assert.match(html, /app\.js\?v=20260818-invite-admin1/);
 assert.match(html, /id="sharing-admin-claim-message"/);
 assert.match(sharing, /管理者として接続しました。工事：\$\{membership\.siteName\}／権限：\$\{roleLabel\(membership\.role\)\}/);
 assert.match(sharing, /const safeMessage = \/15分\|しばらく待って\/i/);
@@ -57,15 +59,21 @@ assert.match(authUrlGuide, /Site URL: `https:\/\/aopen3024\.github\.io\/aoALB\/`
 assert.match(authUrlGuide, /Redirect URL: `https:\/\/aopen3024\.github\.io\/aoALB\/`/);
 assert.match(storage, /db\.transaction\(stores, "readwrite"\)/);
 assert.match(storage, /sources\.has\("zip"\)/);
-for (const id of ["account-login-form", "account-signup-form", "account-upgrade-form", "account-reset-form", "account-clear-device", "account-auth-recovery"]) {
+for (const id of ["account-login-form", "account-invite-note", "account-reset-form", "account-clear-device", "account-auth-recovery", "system-admin-panel", "sharing-create-form"]) {
   assert.match(html, new RegExp(`id="${id}"`));
 }
+assert.doesNotMatch(html, /id="account-signup-form"|id="account-upgrade-form"/);
+assert.match(html, /利用者アカウントは管理者が招待します/);
+assert.match(provider, /invokeAccountAdmin/);
+assert.match(provider, /createSiteForAccount/);
+assert.match(systemAdmin, /textContent/);
+assert.doesNotMatch(systemAdmin, /innerHTML|console\.(log|error|warn)|service_role|sb_secret_/i);
 assert.match(account, /classifyAuthFailure/);
 assert.match(account, /AUTH_CALLBACK_PARAMS\.forEach/);
 assert.match(account, /このメールを送ったブラウザで、最新のメールにあるリンクを開いてください/);
 assert.match(account, /このリンクは使用済み、または有効期限が切れています/);
 assert.match(account, /このブラウザには、引き継げる利用情報がありません/);
-assert.match(account, /Array\.isArray\(memberships\) && memberships\.length > 0/);
+assert.doesNotMatch(account, /同じ利用者のままアカウントへ変更/);
 assert.match(account, /querySelectorAll\('input\[type="password"\]'\)/);
 assert.match(sharing, /clearSharingSecrets/);
 assert.match(sharing, /finally \{[\s\S]*clearSharingSecrets\(ui\.adminJoinCode, ui\.adminJoinConfirm\)/);

@@ -6,7 +6,9 @@
 
 - `list_users`
 - `list_audit`
+- `list_invitation_recovery`
 - `invite`
+- `retry_invitation`
 - `resend_invite`
 - `suspend`
 - `resume`
@@ -27,7 +29,7 @@
 
 公開JavaScriptが使用するのはProject URLとPublishable keyだけです。Secret keyはEdge Functionのサーバー環境だけへ登録します。
 
-招待前にAuthのメール重複を確認します。Auth招待後にプロフィール作成だけが失敗しても、別要求が作成した可能性を排除できないAuthユーザーを自動削除しません。失敗を監査へ残して処理を停止し、対象を管理者が一意に確認してから復旧します。
+招待ごとにブラウザ生成の一意な操作IDを使います。同じ操作IDの再送は同じ処理として扱い、Authユーザーのメタデータ、メールの非可逆フィンガープリント、操作台帳のAuth UUIDがすべて一致するときだけ不足プロフィールを補完します。確認できない既存利用者は自動統合せず、管理画面の復旧対象へ表示します。Auth成功後のDB失敗と復旧は監査へ残り、Authユーザーを自動削除しません。
 
 ## 削除
 

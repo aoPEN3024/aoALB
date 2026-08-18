@@ -9,6 +9,7 @@ begin
   end if;
   if exists (select 1 from public.system_admins)
      or exists (select 1 from public.account_management_audit)
+     or exists (select 1 from public.account_invitation_operations)
      or exists (select 1 from public.user_profiles where status <> 'active') then
     raise exception 'Rollback refused: operational account/admin state exists.';
   end if;
@@ -35,6 +36,10 @@ drop function if exists public.get_my_account_context();
 drop function if exists public.create_site_for_account(text,text,text,text,text);
 drop function if exists public.admin_set_account_status(uuid,uuid,public.account_status,text);
 drop function if exists public.consume_account_admin_rate_limit(uuid,text,integer,integer);
+drop function if exists public.admin_begin_account_invitation(uuid,uuid,text,text);
+drop function if exists public.admin_record_invitation_auth_user(uuid,uuid,uuid);
+drop function if exists public.admin_complete_account_invitation(uuid,uuid);
+drop function if exists public.admin_mark_invitation_recovery_required(uuid,uuid,text);
 drop function if exists private.is_system_admin(uuid);
 drop function if exists private.enforce_active_account_write();
 
@@ -48,6 +53,7 @@ as $$ select case
 revoke all on function private.account_is_active(uuid) from public, anon, authenticated;
 
 drop table public.account_management_rate_limits;
+drop table public.account_invitation_operations;
 drop table public.account_management_audit;
 drop table public.system_admins;
 

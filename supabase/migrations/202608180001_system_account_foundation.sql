@@ -6,7 +6,8 @@ do $preflight$
 begin
   if pg_catalog.to_regtype('public.account_status') is not null
      or pg_catalog.to_regclass('public.system_admins') is not null
-     or pg_catalog.to_regclass('public.account_management_audit') is not null then
+     or pg_catalog.to_regclass('public.account_management_audit') is not null
+     or pg_catalog.to_regclass('public.account_invitation_operations') is not null then
     raise exception 'aoALB system account foundation already exists. Do not rerun this migration.';
   end if;
   if pg_catalog.to_regclass('public.user_profiles') is null
@@ -57,7 +58,9 @@ create table public.account_management_audit (
   actor_user_id uuid references auth.users(id) on delete set null,
   target_user_id uuid references auth.users(id) on delete set null,
   action text not null check (action in (
-    'account.invite', 'account.invite_resend', 'account.activate',
+    'account.invite', 'account.invite_auth_created',
+    'account.invite_recovery_required', 'account.invite_recovered',
+    'account.invite_resend', 'account.activate',
     'account.suspend', 'account.resume', 'account.password_reset',
     'account.delete_equivalent', 'system_admin.grant', 'system_admin.revoke'
   )),
@@ -80,17 +83,38 @@ create table public.account_management_rate_limits (
   primary key (actor_user_id, action)
 );
 
+-- Server-only invitation journal. Email addresses are never stored here in
+-- plaintext; the Auth user is accepted only when its metadata proves that it
+-- was created by the same invitation operation.
+create table public.account_invitation_operations (
+  operation_id uuid primary key,
+  created_by uuid not null references auth.users(id) on delete restrict,
+  email_fingerprint text not null check (email_fingerprint ~ '^[0-9a-f]{64}$'),
+  display_name text not null check (char_length(display_name) between 1 and 80),
+  auth_user_id uuid references auth.users(id) on delete restrict,
+  status text not null check (status in ('requested','auth_created','completed','recovery_required','manual_review')),
+  last_error_code text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  completed_at timestamptz,
+  check ((status in ('auth_created','completed','recovery_required') and auth_user_id is not null)
+    or status in ('requested','manual_review'))
+);
+
 create index user_profiles_status_idx on public.user_profiles(status, last_seen_at desc);
 create index account_management_audit_time_idx on public.account_management_audit(occurred_at desc);
 create index account_management_audit_target_idx on public.account_management_audit(target_user_id, occurred_at desc);
+create index account_invitation_operations_status_idx on public.account_invitation_operations(status, updated_at desc);
 
 alter table public.system_admins enable row level security;
 alter table public.account_management_audit enable row level security;
 alter table public.account_management_rate_limits enable row level security;
+alter table public.account_invitation_operations enable row level security;
 
 revoke all on table public.system_admins, public.account_management_audit,
-  public.account_management_rate_limits from public, anon, authenticated;
+  public.account_management_rate_limits, public.account_invitation_operations from public, anon, authenticated;
 revoke all on sequence public.account_management_audit_id_seq from public, anon, authenticated;
+grant select, insert, update on table public.account_invitation_operations to service_role;
 
 create or replace function private.account_is_active(p_user_id uuid)
 returns boolean
@@ -178,6 +202,165 @@ begin
   update public.account_management_rate_limits set attempt_count = attempt_count + 1
   where actor_user_id = p_actor_user_id and action = p_action;
   return query select true, 0;
+end;
+$$;
+
+create function public.admin_begin_account_invitation(
+  p_actor_user_id uuid,
+  p_operation_id uuid,
+  p_email text,
+  p_display_name text
+)
+returns table(operation_status text, auth_user_id uuid)
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_fingerprint text := pg_catalog.encode(extensions.digest(pg_catalog.lower(pg_catalog.btrim(coalesce(p_email, ''))), 'sha256'), 'hex');
+  v_name text := pg_catalog.btrim(coalesce(p_display_name, ''));
+  v_row public.account_invitation_operations%rowtype;
+begin
+  if coalesce(auth.role(), '') <> 'service_role'
+     or not private.is_system_admin(p_actor_user_id)
+     or p_operation_id is null
+     or char_length(v_name) not between 1 and 80
+     or v_name ~ '[[:cntrl:]]'
+     or char_length(pg_catalog.btrim(coalesce(p_email, ''))) not between 3 and 254 then
+    raise exception using errcode = '42501', message = 'not_allowed';
+  end if;
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_operation_id::text, 180020));
+  select * into v_row from public.account_invitation_operations where operation_id = p_operation_id for update;
+  if not found then
+    insert into public.account_invitation_operations(
+      operation_id, created_by, email_fingerprint, display_name, status
+    ) values (p_operation_id, p_actor_user_id, v_fingerprint, v_name, 'requested')
+    returning * into v_row;
+  elsif v_row.created_by <> p_actor_user_id
+     or v_row.email_fingerprint <> v_fingerprint
+     or v_row.display_name <> v_name then
+    raise exception using errcode = '23505', message = 'invitation_operation_conflict';
+  end if;
+  return query select v_row.status, v_row.auth_user_id;
+end;
+$$;
+
+create function public.admin_record_invitation_auth_user(
+  p_actor_user_id uuid,
+  p_operation_id uuid,
+  p_auth_user_id uuid
+)
+returns text
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_row public.account_invitation_operations%rowtype;
+  v_auth auth.users%rowtype;
+begin
+  if coalesce(auth.role(), '') <> 'service_role' or not private.is_system_admin(p_actor_user_id) then
+    raise exception using errcode = '42501', message = 'not_allowed';
+  end if;
+  select * into v_row from public.account_invitation_operations where operation_id = p_operation_id for update;
+  select * into v_auth from auth.users where id = p_auth_user_id;
+  if not found or v_row.operation_id is null
+     or v_row.email_fingerprint <> pg_catalog.encode(extensions.digest(pg_catalog.lower(coalesce(v_auth.email, '')), 'sha256'), 'hex')
+     or coalesce(v_auth.raw_user_meta_data ->> 'aoalb_invitation_operation_id', '') <> p_operation_id::text
+     or (v_row.auth_user_id is not null and v_row.auth_user_id <> p_auth_user_id) then
+    raise exception using errcode = '42501', message = 'invitation_auth_unverified';
+  end if;
+  update public.account_invitation_operations
+  set auth_user_id = p_auth_user_id, status = case when status = 'completed' then status else 'auth_created' end,
+      last_error_code = null, updated_at = now()
+  where operation_id = p_operation_id;
+  insert into public.account_management_audit(actor_user_id, target_user_id, action, succeeded, reason_code,
+    details)
+  values (p_actor_user_id, p_auth_user_id, 'account.invite_auth_created', true, null,
+    pg_catalog.jsonb_build_object('operation_id', p_operation_id));
+  return 'auth_created';
+end;
+$$;
+
+create function public.admin_complete_account_invitation(
+  p_actor_user_id uuid,
+  p_operation_id uuid
+)
+returns table(operation_status text, target_user_id uuid)
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_row public.account_invitation_operations%rowtype;
+  v_auth auth.users%rowtype;
+  v_recovered boolean;
+begin
+  if coalesce(auth.role(), '') <> 'service_role' or not private.is_system_admin(p_actor_user_id) then
+    raise exception using errcode = '42501', message = 'not_allowed';
+  end if;
+  select * into v_row from public.account_invitation_operations where operation_id = p_operation_id for update;
+  if not found or v_row.auth_user_id is null then
+    raise exception using errcode = 'P0002', message = 'invitation_operation_not_ready';
+  end if;
+  select * into v_auth from auth.users where id = v_row.auth_user_id;
+  if not found
+     or v_row.email_fingerprint <> pg_catalog.encode(extensions.digest(pg_catalog.lower(coalesce(v_auth.email, '')), 'sha256'), 'hex')
+     or coalesce(v_auth.raw_user_meta_data ->> 'aoalb_invitation_operation_id', '') <> p_operation_id::text then
+    update public.account_invitation_operations set status = 'manual_review', last_error_code = 'invitation_auth_unverified', updated_at = now()
+    where operation_id = p_operation_id;
+    insert into public.account_management_audit(actor_user_id, target_user_id, action, succeeded, reason_code, details)
+    values (p_actor_user_id, v_row.auth_user_id, 'account.invite_recovery_required', false,
+      'invitation_auth_unverified', pg_catalog.jsonb_build_object('operation_id', p_operation_id));
+    return query select 'manual_review'::text, v_row.auth_user_id;
+    return;
+  end if;
+  v_recovered := v_row.status = 'recovery_required';
+  if exists (select 1 from public.user_profiles p where p.user_id = v_row.auth_user_id and p.status <> 'invited') then
+    update public.account_invitation_operations set status = 'manual_review', last_error_code = 'profile_state_conflict', updated_at = now()
+    where operation_id = p_operation_id;
+    insert into public.account_management_audit(actor_user_id, target_user_id, action, succeeded, reason_code, details)
+    values (p_actor_user_id, v_row.auth_user_id, 'account.invite_recovery_required', false,
+      'profile_state_conflict', pg_catalog.jsonb_build_object('operation_id', p_operation_id));
+    return query select 'manual_review'::text, v_row.auth_user_id;
+    return;
+  end if;
+  insert into public.user_profiles(
+    user_id, display_name, active, status, invited_at, status_changed_by
+  ) values (
+    v_row.auth_user_id, v_row.display_name, false, 'invited', now(), p_actor_user_id
+  ) on conflict (user_id) do nothing;
+  update public.account_invitation_operations
+  set status = 'completed', last_error_code = null, completed_at = coalesce(completed_at, now()), updated_at = now()
+  where operation_id = p_operation_id;
+  insert into public.account_management_audit(actor_user_id, target_user_id, action, succeeded, reason_code,
+    details)
+  values (p_actor_user_id, v_row.auth_user_id,
+    case when v_recovered then 'account.invite_recovered' else 'account.invite' end,
+    true, null, pg_catalog.jsonb_build_object('operation_id', p_operation_id));
+  return query select 'completed'::text, v_row.auth_user_id;
+end;
+$$;
+
+create function public.admin_mark_invitation_recovery_required(
+  p_actor_user_id uuid,
+  p_operation_id uuid,
+  p_reason_code text
+)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare v_row public.account_invitation_operations%rowtype;
+begin
+  if coalesce(auth.role(), '') <> 'service_role' or not private.is_system_admin(p_actor_user_id) then
+    raise exception using errcode = '42501', message = 'not_allowed';
+  end if;
+  select * into v_row from public.account_invitation_operations where operation_id = p_operation_id for update;
+  if not found or v_row.auth_user_id is null then
+    raise exception using errcode = 'P0002', message = 'invitation_operation_not_ready';
+  end if;
+  update public.account_invitation_operations
+  set status = 'recovery_required', last_error_code = left(coalesce(p_reason_code, 'profile_write_failed'), 80), updated_at = now()
+  where operation_id = p_operation_id and status <> 'completed';
+  insert into public.account_management_audit(actor_user_id, target_user_id, action, succeeded, reason_code,
+    details)
+  values (p_actor_user_id, v_row.auth_user_id, 'account.invite_recovery_required', false,
+    left(coalesce(p_reason_code, 'profile_write_failed'), 80),
+    pg_catalog.jsonb_build_object('operation_id', p_operation_id));
 end;
 $$;
 
@@ -446,6 +629,10 @@ revoke all on function private.is_system_admin(uuid) from public, anon, authenti
 revoke all on function private.enforce_active_account_write() from public, anon, authenticated;
 revoke all on function public.create_site_for_account(text,text,text,text,text) from public, anon, authenticated;
 revoke all on function public.consume_account_admin_rate_limit(uuid,text,integer,integer) from public, anon, authenticated, service_role;
+revoke all on function public.admin_begin_account_invitation(uuid,uuid,text,text) from public, anon, authenticated, service_role;
+revoke all on function public.admin_record_invitation_auth_user(uuid,uuid,uuid) from public, anon, authenticated, service_role;
+revoke all on function public.admin_complete_account_invitation(uuid,uuid) from public, anon, authenticated, service_role;
+revoke all on function public.admin_mark_invitation_recovery_required(uuid,uuid,text) from public, anon, authenticated, service_role;
 revoke all on function public.admin_set_account_status(uuid,uuid,public.account_status,text) from public, anon, authenticated, service_role;
 revoke all on function public.get_my_account_context() from public, anon, authenticated;
 revoke all on function public.activate_my_invited_account(text) from public, anon, authenticated;
@@ -455,11 +642,17 @@ grant execute on function public.activate_my_invited_account(text) to authentica
 grant execute on function public.ensure_my_profile(text) to authenticated;
 grant execute on function public.create_site_for_account(text,text,text,text,text) to authenticated;
 grant execute on function public.consume_account_admin_rate_limit(uuid,text,integer,integer) to service_role;
+grant execute on function public.admin_begin_account_invitation(uuid,uuid,text,text) to service_role;
+grant execute on function public.admin_record_invitation_auth_user(uuid,uuid,uuid) to service_role;
+grant execute on function public.admin_complete_account_invitation(uuid,uuid) to service_role;
+grant execute on function public.admin_mark_invitation_recovery_required(uuid,uuid,text) to service_role;
 grant execute on function public.admin_set_account_status(uuid,uuid,public.account_status,text) to service_role;
 
 comment on table public.system_admins is
   'aoALB account administrators. This role never grants site membership.';
 comment on column public.user_profiles.status is
   'Invitation/account lifecycle. deleted is a history-preserving deletion equivalent.';
+comment on table public.account_invitation_operations is
+  'Server-only idempotency and recovery journal. Stores no plaintext email address.';
 
 commit;

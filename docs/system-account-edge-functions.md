@@ -21,13 +21,13 @@
 
 値はGit、ブラウザ、チャットへ保存しません。
 
-- `SUPABASE_URL`
-- `AOALB_SUPABASE_SECRET_KEY`
-- `AOALB_SUPABASE_PUBLISHABLE_KEY`
+- `SUPABASE_URL`（Supabase が自動提供）
+- `SUPABASE_SERVICE_ROLE_KEY`（Supabase が Edge Function のみに自動提供）
+- `SUPABASE_ANON_KEY`（Supabase が自動提供）
 - `AOALB_AUTH_REDIRECT_URL`
 - `AOALB_ALLOWED_ORIGINS`（カンマ区切り、完全一致）
 
-公開JavaScriptが使用するのはProject URLとPublishable keyだけです。Secret keyはEdge Functionのサーバー環境だけへ登録します。
+上記3値は独自Secretとして重複登録しません。公開JavaScriptが使用するのはProject URLとPublishable keyだけです。`SUPABASE_SERVICE_ROLE_KEY` はEdge Functionのサーバー環境から外へ出しません。
 
 招待ごとにブラウザ生成の一意な操作IDを使います。同じ操作IDの再送は同じ処理として扱い、Authユーザーのメタデータ、メールの非可逆フィンガープリント、操作台帳のAuth UUIDがすべて一致するときだけ不足プロフィールを補完します。確認できない既存利用者は自動統合せず、管理画面の復旧対象へ表示します。Auth成功後のDB失敗と復旧は監査へ残り、Authユーザーを自動削除しません。
 

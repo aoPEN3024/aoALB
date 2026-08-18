@@ -1,7 +1,8 @@
 import { createClient } from "npm:@supabase/supabase-js@2.57.4";
 
 type AdminAction =
-  | "list_users" | "list_audit" | "invite" | "resend_invite"
+  | "list_users" | "list_audit" | "list_invitation_recovery"
+  | "invite" | "retry_invitation" | "resend_invite"
   | "suspend" | "resume" | "send_password_reset" | "delete_equivalent";
 
 type Json = Record<string, unknown>;
@@ -132,6 +133,44 @@ async function findUserByEmail(email: string) {
   throw new Error("auth_list_limit_reached");
 }
 
+async function completeInvitation(actorId: string, operationId: string) {
+  const { data, error } = await admin.rpc("admin_complete_account_invitation", {
+    p_actor_user_id: actorId,
+    p_operation_id: operationId,
+  });
+  if (error || !Array.isArray(data) || !data[0]) throw new Error("invite_profile_failed");
+  if (data[0].operation_status === "manual_review") throw new Error("invitation_recovery_needs_review");
+  return data[0];
+}
+
+async function listInvitationRecovery() {
+  const { data, error } = await admin.from("account_invitation_operations")
+    .select("operation_id,auth_user_id,display_name,status,last_error_code,created_at,updated_at")
+    .in("status", ["auth_created", "recovery_required", "manual_review"])
+    .order("updated_at", { ascending: false }).limit(100);
+  if (error) throw new Error("invitation_recovery_list_failed");
+  const rows = [];
+  for (const row of data ?? []) {
+    let email = "";
+    if (row.auth_user_id) {
+      const result = await admin.auth.admin.getUserById(row.auth_user_id);
+      email = result.data.user?.email ?? "";
+    }
+    rows.push({
+      operationId: row.operation_id,
+      targetUserId: row.auth_user_id,
+      displayName: row.display_name,
+      email,
+      status: row.status,
+      reasonCode: row.last_error_code,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      automaticallyRecoverable: row.status !== "manual_review" && Boolean(row.auth_user_id),
+    });
+  }
+  return rows;
+}
+
 async function changeStatus(actorId: string, targetId: string, nextStatus: "active" | "suspended" | "deleted") {
   const { data: profile } = await admin.from("user_profiles").select("status").eq("user_id", targetId).maybeSingle();
   if (!profile) throw new Error("account_not_found");
@@ -177,13 +216,16 @@ Deno.serve(async (request: Request) => {
     input = JSON.parse(raw);
   } catch { return response(origin, 400, { ok: false, error: "invalid_request" }); }
   const action = safeText(input.action, 40) as AdminAction;
-  const actions: AdminAction[] = ["list_users","list_audit","invite","resend_invite","suspend","resume","send_password_reset","delete_equivalent"];
+  const actions: AdminAction[] = ["list_users","list_audit","list_invitation_recovery","invite","retry_invitation","resend_invite","suspend","resume","send_password_reset","delete_equivalent"];
   if (!actions.includes(action)) return response(origin, 400, { ok: false, error: "invalid_request" });
   const rate = await consumeLimit(actor.id, action);
   if (!rate.allowed) return response(origin, 429, { ok: false, error: "temporarily_limited", retryAfterSeconds: rate.retry });
 
   try {
     if (action === "list_users") return response(origin, 200, { ok: true, users: await listUsers() });
+    if (action === "list_invitation_recovery") {
+      return response(origin, 200, { ok: true, recovery: await listInvitationRecovery() });
+    }
     if (action === "list_audit") {
       const { data, error } = await admin.from("account_management_audit")
         .select("id,actor_user_id,target_user_id,action,succeeded,reason_code,occurred_at")
@@ -194,34 +236,74 @@ Deno.serve(async (request: Request) => {
 
     const targetId = safeText(input.targetUserId, 36);
     if (action === "invite") {
+      const operationId = safeText(input.operationId, 36);
       const email = safeText(input.email, 254).toLowerCase();
       const displayName = safeText(input.displayName, 80);
-      if (!validEmail(email) || !displayName || /[\u0000-\u001f\u007f]/.test(displayName)) {
+      if (!validUuid(operationId) || !validEmail(email) || !displayName || /[\u0000-\u001f\u007f]/.test(displayName)) {
         return response(origin, 400, { ok: false, error: "invalid_input" });
+      }
+      const begin = await admin.rpc("admin_begin_account_invitation", {
+        p_actor_user_id: actor.id,
+        p_operation_id: operationId,
+        p_email: email,
+        p_display_name: displayName,
+      });
+      if (begin.error || !Array.isArray(begin.data) || !begin.data[0]) throw new Error("invitation_operation_failed");
+      const operation = begin.data[0];
+      if (operation.operation_status === "completed") return response(origin, 200, { ok: true, idempotent: true });
+      if (["auth_created", "recovery_required"].includes(operation.operation_status)) {
+        await completeInvitation(actor.id, operationId);
+        return response(origin, 200, { ok: true, recovered: true });
+      }
+      if (operation.operation_status === "manual_review") {
+        return response(origin, 409, { ok: false, error: "invitation_recovery_needs_review" });
       }
       const existingUser = await findUserByEmail(email);
       if (existingUser) {
-        await writeAudit(actor.id, existingUser.id, "account.invite", false, "email_already_registered");
-        return response(origin, 409, { ok: false, error: "email_already_registered" });
+        const existingOperationId = String(existingUser.user_metadata?.aoalb_invitation_operation_id || "");
+        if (existingOperationId === operationId) {
+          const recorded = await admin.rpc("admin_record_invitation_auth_user", {
+            p_actor_user_id: actor.id, p_operation_id: operationId, p_auth_user_id: existingUser.id,
+          });
+          if (recorded.error) throw new Error("invitation_auth_unverified");
+          await completeInvitation(actor.id, operationId);
+          return response(origin, 200, { ok: true, recovered: true });
+        }
+        await admin.from("account_invitation_operations").update({
+          status: "manual_review", last_error_code: "email_already_registered", updated_at: new Date().toISOString(),
+        }).eq("operation_id", operationId).eq("created_by", actor.id);
+        await writeAudit(actor.id, existingUser.id, "account.invite_recovery_required", false, "email_already_registered");
+        return response(origin, 409, { ok: false, error: "invitation_recovery_needs_review" });
       }
       const { data, error } = await admin.auth.admin.inviteUserByEmail(email, {
         redirectTo: AUTH_REDIRECT_URL,
-        data: { display_name: displayName },
+        data: { display_name: displayName, aoalb_invitation_operation_id: operationId },
       });
       if (error || !data.user?.id) throw new Error("invite_failed");
       auditTargetId = data.user.id;
-      const { error: profileError } = await admin.from("user_profiles").insert({
-        user_id: data.user.id, display_name: displayName, active: false,
-        status: "invited", invited_at: new Date().toISOString(), status_changed_by: actor.id,
+      const recorded = await admin.rpc("admin_record_invitation_auth_user", {
+        p_actor_user_id: actor.id, p_operation_id: operationId, p_auth_user_id: data.user.id,
       });
-      if (profileError) {
-        // Do not compensate by deleting an Auth user. Auth and Postgres are not
-        // one transaction; a concurrent invitation could otherwise delete an
-        // account that this request did not safely prove it created.
-        throw new Error("invite_profile_failed");
+      if (recorded.error) throw new Error("invitation_auth_unverified");
+      try {
+        await completeInvitation(actor.id, operationId);
+      } catch (completionError) {
+        if (!(completionError instanceof Error) || completionError.message !== "invitation_recovery_needs_review") {
+          await admin.rpc("admin_mark_invitation_recovery_required", {
+            p_actor_user_id: actor.id,
+            p_operation_id: operationId,
+            p_reason_code: "invite_profile_failed",
+          });
+        }
+        throw completionError;
       }
-      await writeAudit(actor.id, data.user.id, "account.invite", true, "");
       return response(origin, 200, { ok: true });
+    }
+    if (action === "retry_invitation") {
+      const operationId = safeText(input.operationId, 36);
+      if (!validUuid(operationId)) return response(origin, 400, { ok: false, error: "invalid_input" });
+      const result = await completeInvitation(actor.id, operationId);
+      return response(origin, 200, { ok: true, recovered: true, targetUserId: result.target_user_id });
     }
     if (!validUuid(targetId)) return response(origin, 400, { ok: false, error: "invalid_input" });
     auditTargetId = targetId;
@@ -255,13 +337,15 @@ Deno.serve(async (request: Request) => {
     const code = error instanceof Error ? error.message : "operation_failed";
     const safeCodes = new Set([
       "account_not_found","invitation_unavailable","invite_failed","invite_profile_failed",
+      "invitation_operation_failed","invitation_operation_conflict","invitation_auth_unverified",
+      "invitation_recovery_needs_review","invitation_recovery_list_failed",
       "email_already_registered","auth_list_limit_reached",
       "invite_resend_failed","password_reset_failed","auth_state_change_failed",
       "self_change_not_allowed","system_admin_delete_not_allowed","last_system_admin",
       "sole_site_admin","storage_owner_exists","deleted_account_cannot_resume",
     ]);
     const safeCode = safeCodes.has(code) ? code : "operation_failed";
-    if (!action.startsWith("list_")) {
+    if (!action.startsWith("list_") && !["invite", "retry_invitation"].includes(action)) {
       await writeAudit(actor.id, auditTargetId, action === "delete_equivalent" ? "account.delete_equivalent" :
         action === "send_password_reset" ? "account.password_reset" :
         action === "resend_invite" ? "account.invite_resend" :

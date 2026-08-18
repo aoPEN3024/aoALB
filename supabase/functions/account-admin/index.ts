@@ -121,6 +121,17 @@ async function listUsers() {
   });
 }
 
+async function findUserByEmail(email: string) {
+  for (let page = 1; page <= 10; page += 1) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 100 });
+    if (error) throw new Error("auth_list_failed");
+    const match = data.users.find((user) => String(user.email || "").toLowerCase() === email);
+    if (match) return match;
+    if (data.users.length < 100) return null;
+  }
+  throw new Error("auth_list_limit_reached");
+}
+
 async function changeStatus(actorId: string, targetId: string, nextStatus: "active" | "suspended" | "deleted") {
   const { data: profile } = await admin.from("user_profiles").select("status").eq("user_id", targetId).maybeSingle();
   if (!profile) throw new Error("account_not_found");
@@ -157,6 +168,7 @@ Deno.serve(async (request: Request) => {
   if (!actor) return response(origin, 403, { ok: false, error: "not_allowed" });
 
   let input: Json;
+  let auditTargetId: string | null = null;
   try {
     const raw = await request.text();
     if (new TextEncoder().encode(raw).byteLength > 8192) {
@@ -187,23 +199,32 @@ Deno.serve(async (request: Request) => {
       if (!validEmail(email) || !displayName || /[\u0000-\u001f\u007f]/.test(displayName)) {
         return response(origin, 400, { ok: false, error: "invalid_input" });
       }
+      const existingUser = await findUserByEmail(email);
+      if (existingUser) {
+        await writeAudit(actor.id, existingUser.id, "account.invite", false, "email_already_registered");
+        return response(origin, 409, { ok: false, error: "email_already_registered" });
+      }
       const { data, error } = await admin.auth.admin.inviteUserByEmail(email, {
         redirectTo: AUTH_REDIRECT_URL,
         data: { display_name: displayName },
       });
       if (error || !data.user?.id) throw new Error("invite_failed");
+      auditTargetId = data.user.id;
       const { error: profileError } = await admin.from("user_profiles").insert({
         user_id: data.user.id, display_name: displayName, active: false,
         status: "invited", invited_at: new Date().toISOString(), status_changed_by: actor.id,
       });
       if (profileError) {
-        await admin.auth.admin.deleteUser(data.user.id);
+        // Do not compensate by deleting an Auth user. Auth and Postgres are not
+        // one transaction; a concurrent invitation could otherwise delete an
+        // account that this request did not safely prove it created.
         throw new Error("invite_profile_failed");
       }
       await writeAudit(actor.id, data.user.id, "account.invite", true, "");
       return response(origin, 200, { ok: true });
     }
     if (!validUuid(targetId)) return response(origin, 400, { ok: false, error: "invalid_input" });
+    auditTargetId = targetId;
 
     const { data: target, error: targetError } = await admin.auth.admin.getUserById(targetId);
     if (targetError || !target.user) throw new Error("account_not_found");
@@ -234,13 +255,14 @@ Deno.serve(async (request: Request) => {
     const code = error instanceof Error ? error.message : "operation_failed";
     const safeCodes = new Set([
       "account_not_found","invitation_unavailable","invite_failed","invite_profile_failed",
+      "email_already_registered","auth_list_limit_reached",
       "invite_resend_failed","password_reset_failed","auth_state_change_failed",
       "self_change_not_allowed","system_admin_delete_not_allowed","last_system_admin",
       "sole_site_admin","storage_owner_exists","deleted_account_cannot_resume",
     ]);
     const safeCode = safeCodes.has(code) ? code : "operation_failed";
     if (!action.startsWith("list_")) {
-      await writeAudit(actor.id, null, action === "delete_equivalent" ? "account.delete_equivalent" :
+      await writeAudit(actor.id, auditTargetId, action === "delete_equivalent" ? "account.delete_equivalent" :
         action === "send_password_reset" ? "account.password_reset" :
         action === "resend_invite" ? "account.invite_resend" :
         action === "invite" ? "account.invite" :

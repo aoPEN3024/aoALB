@@ -8,8 +8,8 @@ type AdminAction =
 type Json = Record<string, unknown>;
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
-const SECRET_KEY = Deno.env.get("AOALB_SUPABASE_SECRET_KEY") ?? "";
-const PUBLISHABLE_KEY = Deno.env.get("AOALB_SUPABASE_PUBLISHABLE_KEY") ?? "";
+const SECRET_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+const PUBLISHABLE_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 const AUTH_REDIRECT_URL = Deno.env.get("AOALB_AUTH_REDIRECT_URL") ?? "";
 const ALLOWED_ORIGINS = new Set(
   (Deno.env.get("AOALB_ALLOWED_ORIGINS") ?? "https://aopen3024.github.io")

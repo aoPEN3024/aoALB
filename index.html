@@ -10,7 +10,7 @@
   <link rel="icon" type="image/png" sizes="16x16" href="assets/brand/favicon-16-v1.png">
   <link rel="icon" type="image/png" sizes="32x32" href="assets/brand/favicon-32-v1.png">
   <link rel="apple-touch-icon" sizes="180x180" href="assets/brand/apple-touch-icon-v1.png">
-  <link rel="stylesheet" href="css/app.css?v=20260818-invite-admin1">
+  <link rel="stylesheet" href="css/app.css?v=20260818-invite-recovery1">
   <link rel="stylesheet" href="css/print.css" media="print">
 </head>
 <body>
@@ -195,6 +195,8 @@
             <button type="submit" class="primary">招待メールを送る</button>
           </form>
           <p id="system-admin-message" class="sharing-message" role="status" aria-live="polite"></p>
+          <p class="limit-note">利用停止は再開できます。「削除扱い」は写真・台帳・監査を保持したまま利用を無効にし、通常画面からは再開できません。</p>
+          <details class="friendly-details" hidden><summary>復旧が必要な招待</summary><div id="system-admin-invitation-recovery" class="system-admin-users"></div></details>
           <div id="system-admin-users" class="system-admin-users"></div>
           <details class="friendly-details"><summary>管理操作履歴</summary><div id="system-admin-audit" class="system-admin-audit"></div></details>
         </section>
@@ -579,6 +581,6 @@
   </dialog>
 
   <script src="vendor/jszip.min.js"></script>
-  <script type="module" src="js/app.js?v=20260818-invite-admin1"></script>
+  <script type="module" src="js/app.js?v=20260818-invite-recovery1"></script>
 </body>
 </html>

@@ -1,5 +1,5 @@
 import { loadCloudConfig, loadLocalCloudConfig } from "./cloud/config.js";
-import { createSupabaseProvider } from "./cloud/supabase-provider.js?v=20260818-invite-admin1";
+import { createSupabaseProvider } from "./cloud/supabase-provider.js?v=20260818-invite-recovery1";
 import { clearSharedDeviceData, getCloudChanges } from "./storage.js";
 
 const DEVICE_KEY = "aoALB:accountDeviceUid";

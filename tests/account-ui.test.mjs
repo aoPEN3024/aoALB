@@ -46,12 +46,12 @@ assert.equal(
 for (const source of [account, sharing, app, html]) {
   assert.doesNotMatch(source, /v=20260731-photo-delete2/);
 }
-assert.match(account, /supabase-provider\.js\?v=20260818-invite-admin1/);
-assert.match(sharing, /supabase-provider\.js\?v=20260818-invite-admin1/);
-assert.match(app, /sharing\.js\?v=20260818-invite-admin1/);
-assert.match(app, /account\.js\?v=20260818-invite-admin1/);
-assert.match(app, /system-admin\.js\?v=20260818-invite-admin1/);
-assert.match(html, /app\.js\?v=20260818-invite-admin1/);
+assert.match(account, /supabase-provider\.js\?v=20260818-invite-recovery1/);
+assert.match(sharing, /supabase-provider\.js\?v=20260818-invite-recovery1/);
+assert.match(app, /sharing\.js\?v=20260818-invite-recovery1/);
+assert.match(app, /account\.js\?v=20260818-invite-recovery1/);
+assert.match(app, /system-admin\.js\?v=20260818-invite-recovery1/);
+assert.match(html, /app\.js\?v=20260818-invite-recovery1/);
 assert.match(html, /id="sharing-admin-claim-message"/);
 assert.match(sharing, /管理者として接続しました。工事：\$\{membership\.siteName\}／権限：\$\{roleLabel\(membership\.role\)\}/);
 assert.match(sharing, /const safeMessage = \/15分\|しばらく待って\/i/);
@@ -59,7 +59,7 @@ assert.match(authUrlGuide, /Site URL: `https:\/\/aopen3024\.github\.io\/aoALB\/`
 assert.match(authUrlGuide, /Redirect URL: `https:\/\/aopen3024\.github\.io\/aoALB\/`/);
 assert.match(storage, /db\.transaction\(stores, "readwrite"\)/);
 assert.match(storage, /sources\.has\("zip"\)/);
-for (const id of ["account-login-form", "account-invite-note", "account-reset-form", "account-clear-device", "account-auth-recovery", "system-admin-panel", "sharing-create-form"]) {
+for (const id of ["account-login-form", "account-invite-note", "account-reset-form", "account-clear-device", "account-auth-recovery", "system-admin-panel", "system-admin-invitation-recovery", "sharing-create-form"]) {
   assert.match(html, new RegExp(`id="${id}"`));
 }
 assert.doesNotMatch(html, /id="account-signup-form"|id="account-upgrade-form"/);
@@ -67,6 +67,11 @@ assert.match(html, /利用者アカウントは管理者が招待します/);
 assert.match(provider, /invokeAccountAdmin/);
 assert.match(provider, /createSiteForAccount/);
 assert.match(systemAdmin, /textContent/);
+assert.match(systemAdmin, /crypto\.randomUUID\(\)/);
+assert.match(systemAdmin, /pendingInviteOperationId/);
+assert.match(systemAdmin, /retry_invitation/);
+assert.match(systemAdmin, /自動修復しません/);
+assert.match(systemAdmin, /通常画面からは再開できません/);
 assert.doesNotMatch(systemAdmin, /innerHTML|console\.(log|error|warn)|service_role|sb_secret_/i);
 assert.match(account, /classifyAuthFailure/);
 assert.match(account, /AUTH_CALLBACK_PARAMS\.forEach/);

@@ -2,7 +2,7 @@ import { loadCloudConfig, loadLocalCloudConfig, saveCloudConfig } from "./cloud/
 import { MockSiteProvider } from "./cloud/mock-provider.js";
 import { detectNetworkStatus, formatTransferBytes, networkLabel, NETWORK_STATUS, shouldAutoSync } from "./cloud/network.js";
 import { classifyPhotoSyncError, createPhotoPackage } from "./cloud/photo-sync.js";
-import { createSupabaseProvider } from "./cloud/supabase-provider.js?v=20260818-invite-admin1";
+import { createSupabaseProvider } from "./cloud/supabase-provider.js?v=20260818-invite-recovery1";
 import {
   cacheAllOriginals, clearCurrentSiteCloudCache, cloudDownloadSummary,
   configureCloudReceiver, disconnectCloudReceiver, syncCloudPhotos

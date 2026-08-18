@@ -33,6 +33,8 @@ $drop_guards$;
 drop function if exists public.activate_my_invited_account(text);
 drop function if exists public.get_my_account_context();
 drop function if exists public.create_site_for_account(text,text,text,text,text);
+drop function if exists public.admin_set_account_status(uuid,uuid,public.account_status,text);
+drop function if exists public.consume_account_admin_rate_limit(uuid,text,integer,integer);
 drop function if exists private.is_system_admin(uuid);
 drop function if exists private.enforce_active_account_write();
 

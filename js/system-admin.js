@@ -28,6 +28,7 @@ function safeAdminMessage(error) {
   const messages = {
     temporarily_limited: "操作が続いたため一時的に制限されています。しばらく待ってからお試しください。",
     invalid_input: "入力内容を確認してください。",
+    email_already_registered: "このメールアドレスは登録済みです。利用者一覧を確認してください。",
     account_not_found: "対象の利用者を確認できませんでした。最新の一覧を読み込んでください。",
     invitation_unavailable: "この利用者へ招待メールを再送できません。",
     confirmation_mismatch: "確認入力が一致しません。",

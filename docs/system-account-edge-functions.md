@@ -1,0 +1,43 @@
+# アカウント管理Edge Function
+
+`account-admin` はシステム管理者専用の単一エンドポイントです。操作ごとに `action` を指定します。
+
+## 操作一覧
+
+- `list_users`
+- `list_audit`
+- `invite`
+- `resend_invite`
+- `suspend`
+- `resume`
+- `send_password_reset`
+- `delete_equivalent`
+
+すべての操作でBearer tokenを検証し、activeなシステム管理者であることをサーバー側で再確認します。一般利用者や未ログイン利用者はHTML表示の有無に関係なく実行できません。
+
+## 必要なSecrets / 環境変数
+
+値はGit、ブラウザ、チャットへ保存しません。
+
+- `SUPABASE_URL`
+- `AOALB_SUPABASE_SECRET_KEY`
+- `AOALB_SUPABASE_PUBLISHABLE_KEY`
+- `AOALB_AUTH_REDIRECT_URL`
+- `AOALB_ALLOWED_ORIGINS`（カンマ区切り、完全一致）
+
+公開JavaScriptが使用するのはProject URLとPublishable keyだけです。Secret keyはEdge Functionのサーバー環境だけへ登録します。
+
+## 削除
+
+`delete_equivalent` はAuth物理削除ではありません。メール完全一致確認、システム管理者でないこと、唯一の工事管理者でないこと、Storage所有物がないことを確認し、プロフィールをdeleted、端末・所属を無効化し、Authを長期banします。写真・台帳・監査履歴は削除しません。
+
+## デプロイ前確認
+
+1. DB migrationとbootstrapを適用
+2. verification SQLを実行
+3. SecretsをDashboardへ登録
+4. 許可Originに本番URLと使用中のlocalhost完全一致だけを設定
+5. Functionをデプロイ
+6. 一般利用者・未ログイン・停止利用者の拒否を実通信で確認
+
+本PRではデプロイもSecrets登録も行いません。

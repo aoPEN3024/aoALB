@@ -4,19 +4,24 @@ select pg_catalog.jsonb_build_object(
   'system_admins_table', pg_catalog.to_regclass('public.system_admins') is not null,
   'management_audit_table', pg_catalog.to_regclass('public.account_management_audit') is not null,
   'rate_limit_table', pg_catalog.to_regclass('public.account_management_rate_limits') is not null,
+  'invitation_operations_table', pg_catalog.to_regclass('public.account_invitation_operations') is not null,
+  'invitation_recovery_required', (select count(*) from public.account_invitation_operations
+    where status in ('recovery_required','manual_review')),
   'active_system_admins', (select count(*) from public.system_admins where active),
   'status_counts', (select coalesce(jsonb_object_agg(status, amount), '{}'::jsonb)
     from (select status::text, count(*) amount from public.user_profiles group by status) q),
   'plaintext_email_columns', (select count(*) from information_schema.columns
     where table_schema in ('public','private') and table_name in
-      ('system_admins','account_management_audit','account_management_rate_limits')
+      ('system_admins','account_management_audit','account_management_rate_limits','account_invitation_operations')
       and column_name ilike '%email%'),
   'authenticated_table_grants', (select count(*) from information_schema.role_table_grants
     where grantee in ('anon','authenticated') and table_schema = 'public'
-      and table_name in ('system_admins','account_management_audit','account_management_rate_limits')),
+      and table_name in ('system_admins','account_management_audit','account_management_rate_limits','account_invitation_operations')),
   'public_function_grants', (select count(*) from information_schema.routine_privileges
     where grantee in ('PUBLIC','anon') and specific_schema in ('public','private')
-      and routine_name in ('get_my_account_context','activate_my_invited_account','is_system_admin')),
+      and routine_name in ('get_my_account_context','activate_my_invited_account','is_system_admin',
+        'admin_begin_account_invitation','admin_record_invitation_auth_user',
+        'admin_complete_account_invitation','admin_mark_invitation_recovery_required')),
   'write_guard_count', (select count(*) from pg_catalog.pg_trigger t
     join pg_catalog.pg_proc p on p.oid = t.tgfoid
     join pg_catalog.pg_namespace n on n.oid = p.pronamespace

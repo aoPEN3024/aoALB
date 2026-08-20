@@ -13,7 +13,10 @@ select pg_catalog.jsonb_build_object(
   'plaintext_email_columns', (select count(*) from information_schema.columns
     where table_schema in ('public','private') and table_name in
       ('system_admins','account_management_audit','account_management_rate_limits','account_invitation_operations')
-      and column_name ilike '%email%'),
+      and column_name ilike '%email%'
+      and column_name not ilike '%fingerprint%'
+      and column_name not ilike '%hash%'
+      and column_name not ilike '%digest%'),
   'authenticated_table_grants', (select count(*) from information_schema.role_table_grants
     where grantee in ('anon','authenticated') and table_schema = 'public'
       and table_name in ('system_admins','account_management_audit','account_management_rate_limits','account_invitation_operations')),

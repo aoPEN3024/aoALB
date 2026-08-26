@@ -17,6 +17,8 @@
 
 すべての操作でBearer tokenを検証し、activeなシステム管理者であることをサーバー側で再確認します。一般利用者や未ログイン利用者はHTML表示の有無に関係なく実行できません。
 
+`supabase/config.toml` では `verify_jwt = false` とします。これは新しい非対称署名JWTを旧方式のGateway検証がFunction到達前に拒否しないための設定です。Function本体がBearer tokenをSupabase Authへ照会し、本人、activeプロフィール、activeなシステム管理者を毎回確認します。未ログイン・無効token・一般利用者を許可する設定ではありません。
+
 ## 必要なSecrets / 環境変数
 
 値はGit、ブラウザ、チャットへ保存しません。

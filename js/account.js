@@ -1,5 +1,5 @@
 import { loadCloudConfig, loadLocalCloudConfig } from "./cloud/config.js";
-import { createSupabaseProvider } from "./cloud/supabase-provider.js?v=20260901-invite-callback1";
+import { createSupabaseProvider } from "./cloud/supabase-provider.js?v=20260901-invite-callback2";
 import { clearSharedDeviceData, getCloudChanges } from "./storage.js";
 
 const DEVICE_KEY = "aoALB:accountDeviceUid";
@@ -46,6 +46,9 @@ export function classifyAuthFailure(error, callbackUrl = null, authAction = "") 
   }
   if (callbackParam(callbackUrl, "code") || callbackParam(callbackUrl, "error") || /invalid.*(code|link|token)|access denied/.test(detail)) {
     return { code: "invalid_link", action, message: "この認証リンクを確認できませんでした。最新のメールからやり直してください。" };
+  }
+  if (code === "user_banned" || /user.*banned|account.*(?:suspended|disabled)/.test(detail)) {
+    return { code: "account_suspended", action, message: "このアカウントは利用停止中です。管理者へ確認してください。" };
   }
   if (code === "invalid_credentials" || /invalid login credentials/.test(detail)) {
     return { code: "invalid_credentials", action, message: "メールアドレスまたはパスワードを確認してください。" };

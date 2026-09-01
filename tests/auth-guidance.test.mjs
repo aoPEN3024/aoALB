@@ -13,6 +13,10 @@ assert.deepEqual(
 );
 assert.equal(classifyAuthFailure({ code: "otp_expired" }, callback("?error=access_denied"), "recovery").code, "link_expired");
 assert.equal(classifyAuthFailure(new TypeError("Failed to fetch")).code, "network");
+assert.deepEqual(
+  classifyAuthFailure(Object.assign(new Error("User is banned"), { code: "user_banned" })),
+  { code: "account_suspended", action: "", message: "このアカウントは利用停止中です。管理者へ確認してください。" }
+);
 assert.equal(classifyAuthFailure(new Error("Invalid login credentials")).code, "invalid_credentials");
 assert.equal(classifyAuthFailure(new Error("unexpected"), callback("?code=invalid"), "signup").code, "invalid_link");
 assert.equal(classifyAuthFailure({ code: "otp_expired" }, callback("#error=access_denied&error_code=otp_expired"), "signup").code, "link_expired");

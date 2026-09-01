@@ -1,5 +1,5 @@
 import { loadCloudConfig, loadLocalCloudConfig } from "./cloud/config.js";
-import { createSupabaseProvider } from "./cloud/supabase-provider.js?v=20260818-invite-recovery1";
+import { createSupabaseProvider } from "./cloud/supabase-provider.js?v=20260901-invite-callback1";
 import { clearSharedDeviceData, getCloudChanges } from "./storage.js";
 
 const DEVICE_KEY = "aoALB:accountDeviceUid";
@@ -11,6 +11,15 @@ const PASSWORD_MODE_RECOVERY = "recovery";
 const PASSWORD_MODE_SIGNUP = "signup";
 
 const AUTH_CALLBACK_PARAMS = ["code", "state", "error", "error_code", "error_description", "token", "token_hash", "type", "authAction"];
+const AUTH_FRAGMENT_PARAMS = ["access_token", "refresh_token", "expires_at", "expires_in", "provider_token", "provider_refresh_token", "token_type", "type", "error", "error_code", "error_description"];
+
+function authFragment(url) {
+  return new URLSearchParams(String(url?.hash || "").replace(/^#/, ""));
+}
+
+function callbackParam(url, name) {
+  return url?.searchParams?.get(name) || authFragment(url).get(name) || "";
+}
 
 function safeError(message) {
   const error = new Error(message);
@@ -19,9 +28,9 @@ function safeError(message) {
 }
 
 export function classifyAuthFailure(error, callbackUrl = null, authAction = "") {
-  const code = String(error?.code || callbackUrl?.searchParams?.get("error_code") || "").toLowerCase();
+  const code = String(error?.code || callbackParam(callbackUrl, "error_code") || "").toLowerCase();
   const name = String(error?.name || "").toLowerCase();
-  const detail = String(error?.message || callbackUrl?.searchParams?.get("error_description") || "").toLowerCase();
+  const detail = String(error?.message || callbackParam(callbackUrl, "error_description") || "").toLowerCase();
   const action = [PASSWORD_MODE_RECOVERY, PASSWORD_MODE_UPGRADE, PASSWORD_MODE_SIGNUP].includes(authAction) ? authAction : "";
   if (name === "typeerror" || /failed to fetch|network|offline|load failed/.test(detail)) {
     return { code: "network", action, message: "通信できませんでした。接続を確認して、もう一度お試しください。" };
@@ -35,7 +44,7 @@ export function classifyAuthFailure(error, callbackUrl = null, authAction = "") 
   if (code === "otp_expired" || /expired|already used|has been used|one-time/.test(detail)) {
     return { code: "link_expired", action, message: "このリンクは使用済み、または有効期限が切れています。最新のメールからやり直してください。" };
   }
-  if (callbackUrl?.searchParams?.has("code") || callbackUrl?.searchParams?.has("error") || /invalid.*(code|link|token)|access denied/.test(detail)) {
+  if (callbackParam(callbackUrl, "code") || callbackParam(callbackUrl, "error") || /invalid.*(code|link|token)|access denied/.test(detail)) {
     return { code: "invalid_link", action, message: "この認証リンクを確認できませんでした。最新のメールからやり直してください。" };
   }
   if (code === "invalid_credentials" || /invalid login credentials/.test(detail)) {
@@ -65,7 +74,9 @@ function redirectUrl(authAction = "") {
 function clearAuthCallbackUrl() {
   const url = new URL(location.href);
   AUTH_CALLBACK_PARAMS.forEach(name => url.searchParams.delete(name));
-  history.replaceState(history.state, "", `${url.pathname}${url.search}${url.hash || "#sharing"}`);
+  const fragment = authFragment(url);
+  const isAuthFragment = AUTH_FRAGMENT_PARAMS.some(name => fragment.has(name));
+  history.replaceState(history.state, "", `${url.pathname}${url.search}${isAuthFragment ? "#sharing" : (url.hash || "#sharing")}`);
 }
 
 export function initAccountUI() {
@@ -114,17 +125,21 @@ export function initAccountUI() {
     if (!config) throw safeError("共有機能の接続設定がありません。端末内モードは引き続き利用できます。");
     provider = await createSupabaseProvider(config);
     const callbackUrl = new URL(location.href);
-    const hasCallback = AUTH_CALLBACK_PARAMS.some(name => callbackUrl.searchParams.has(name));
+    const callbackFragment = authFragment(callbackUrl);
+    const hasCallback = AUTH_CALLBACK_PARAMS.some(name => callbackUrl.searchParams.has(name))
+      || AUTH_FRAGMENT_PARAMS.some(name => callbackFragment.has(name));
     if (hasCallback) {
-      const authAction = callbackUrl.searchParams.get("authAction") || "";
+      const authAction = callbackParam(callbackUrl, "authAction");
       try {
-        if (callbackUrl.searchParams.has("error")) {
+        if (callbackParam(callbackUrl, "error")) {
           const callbackError = new Error("Authentication callback rejected");
-          callbackError.code = callbackUrl.searchParams.get("error_code") || "callback_rejected";
+          callbackError.code = callbackParam(callbackUrl, "error_code") || "callback_rejected";
           throw callbackError;
         }
         await provider.consumeAuthCallback(location.href);
-        if (authAction === PASSWORD_MODE_RECOVERY) localStorage.setItem(PENDING_PASSWORD_KEY, PASSWORD_MODE_RECOVERY);
+        if ([PASSWORD_MODE_RECOVERY, PASSWORD_MODE_SIGNUP].includes(authAction)) {
+          localStorage.setItem(PENDING_PASSWORD_KEY, authAction);
+        }
       } catch (error) {
         authNotice = classifyAuthFailure(error, callbackUrl, authAction);
       } finally {

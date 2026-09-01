@@ -6,6 +6,9 @@ const config = readFileSync(new URL("../supabase/config.toml", import.meta.url),
 
 assert.match(edge, /@supabase\/supabase-js@2\.57\.4/);
 assert.match(edge, /ALLOWED_ORIGINS\.has\(origin\)/);
+assert.match(edge, /function authRedirect\(action: "signup" \| "recovery"\)/);
+assert.match(edge, /inviteUserByEmail\(email,[\s\S]*redirectTo: authRedirect\("signup"\)/);
+assert.match(edge, /resetPasswordForEmail\(target\.user\.email, \{ redirectTo: authRedirect\("recovery"\) \}\)/);
 assert.match(edge, /admin\.auth\.getUser\(token\)/);
 assert.match(edge, /account\?\.status === "active"[\s\S]*systemAdmin\?\.active/);
 assert.match(edge, /consume_account_admin_rate_limit/);

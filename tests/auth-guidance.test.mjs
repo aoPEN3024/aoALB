@@ -15,6 +15,7 @@ assert.equal(classifyAuthFailure({ code: "otp_expired" }, callback("?error=acces
 assert.equal(classifyAuthFailure(new TypeError("Failed to fetch")).code, "network");
 assert.equal(classifyAuthFailure(new Error("Invalid login credentials")).code, "invalid_credentials");
 assert.equal(classifyAuthFailure(new Error("unexpected"), callback("?code=invalid"), "signup").code, "invalid_link");
+assert.equal(classifyAuthFailure({ code: "otp_expired" }, callback("#error=access_denied&error_code=otp_expired"), "signup").code, "link_expired");
 assert.equal(classifyAuthFailure(new Error("unexpected")).code, "auth_failed");
 
 console.log("auth guidance classification checks passed");

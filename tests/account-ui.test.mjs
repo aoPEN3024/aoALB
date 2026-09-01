@@ -17,6 +17,8 @@ assert.match(provider, /resetPasswordForEmail/);
 assert.match(account, /clearSharedDeviceData/);
 assert.match(account, /localStorage\.setItem\(MODE_KEY, "local"\)/);
 assert.match(provider, /exchangeCodeForSession\(code\)/);
+assert.match(provider, /client\.auth\.setSession\(\{[\s\S]*access_token: accessToken,[\s\S]*refresh_token: refreshToken/);
+assert.match(provider, /inviteUserByEmail cannot use PKCE/);
 const callbackFunction = provider.slice(provider.indexOf("async consumeAuthCallback"), provider.indexOf("async getAccountSession"));
 assert.doesNotMatch(callbackFunction, /current\.session|refreshSession/);
 assert.match(provider, /detectSessionInUrl: false/);
@@ -33,7 +35,7 @@ const redirectFunction = account.slice(account.indexOf("function redirectUrl"), 
 assert.doesNotMatch(redirectFunction, /new URL\(location\.href\)/);
 assert.doesNotMatch(redirectFunction, /\.hash\s*=/);
 assert.match(redirectFunction, /searchParams\.set\("authAction", authAction\)/);
-assert.match(account, /const authAction = callbackUrl\.searchParams\.get\("authAction"\)[\s\S]*authAction === PASSWORD_MODE_RECOVERY[\s\S]*localStorage\.setItem\(PENDING_PASSWORD_KEY, PASSWORD_MODE_RECOVERY\)/);
+assert.match(account, /const authAction = callbackParam\(callbackUrl, "authAction"\)[\s\S]*PASSWORD_MODE_RECOVERY, PASSWORD_MODE_SIGNUP[\s\S]*localStorage\.setItem\(PENDING_PASSWORD_KEY, authAction\)/);
 assert.match(account, /"error_description"[\s\S]*"authAction"/);
 assert.match(account, /PASSWORD_MODE_RECOVERY/);
 assert.match(account, /activateInvitedAccount/);
@@ -46,12 +48,14 @@ assert.equal(
 for (const source of [account, sharing, app, html]) {
   assert.doesNotMatch(source, /v=20260731-photo-delete2/);
 }
-assert.match(account, /supabase-provider\.js\?v=20260818-invite-recovery1/);
-assert.match(sharing, /supabase-provider\.js\?v=20260818-invite-recovery1/);
-assert.match(app, /sharing\.js\?v=20260818-invite-recovery1/);
-assert.match(app, /account\.js\?v=20260818-invite-recovery1/);
-assert.match(app, /system-admin\.js\?v=20260818-invite-recovery1/);
-assert.match(html, /app\.js\?v=20260818-invite-recovery1/);
+assert.match(account, /supabase-provider\.js\?v=20260901-invite-callback1/);
+assert.match(sharing, /supabase-provider\.js\?v=20260901-invite-callback1/);
+assert.match(app, /sharing\.js\?v=20260901-invite-callback1/);
+assert.match(app, /account\.js\?v=20260901-invite-callback1/);
+assert.match(app, /system-admin\.js\?v=20260901-invite-callback1/);
+assert.match(html, /app\.js\?v=20260901-invite-callback1/);
+assert.match(account, /AUTH_FRAGMENT_PARAMS[\s\S]*access_token[\s\S]*refresh_token/);
+assert.match(account, /isAuthFragment \? "#sharing"/);
 assert.match(html, /id="sharing-admin-claim-message"/);
 assert.match(sharing, /管理者として接続しました。工事：\$\{membership\.siteName\}／権限：\$\{roleLabel\(membership\.role\)\}/);
 assert.match(sharing, /const safeMessage = \/15分\|しばらく待って\/i/);
@@ -83,5 +87,6 @@ assert.match(account, /querySelectorAll\('input\[type="password"\]'\)/);
 assert.match(sharing, /clearSharingSecrets/);
 assert.match(sharing, /finally \{[\s\S]*clearSharingSecrets\(ui\.adminJoinCode, ui\.adminJoinConfirm\)/);
 assert.doesNotMatch(account, /console\.(log|error|warn)/);
-assert.doesNotMatch(account, /service_role|sb_secret_|access_token|refresh_token/i);
+assert.doesNotMatch(account, /service_role|sb_secret_/i);
+assert.doesNotMatch(account, /localStorage\.setItem\([^\n]*(access_token|refresh_token)|console\.[^(]+\([^\n]*(access_token|refresh_token)/i);
 console.log("account UI static checks passed");

@@ -34,12 +34,28 @@ async function buildSupabaseProvider(config) {
     async consumeAuthCallback(url) {
       const callbackUrl = new URL(url, location.origin);
       const code = callbackUrl.searchParams.get("code");
-      if (!code) return false;
-      // A recovery or confirmation code represents the session selected by
-      // the email link. Always exchange it, even when this browser still has
-      // an older anonymous or signed-in session.
-      const result = await client.auth.exchangeCodeForSession(code);
-      const { error } = result;
+      if (code) {
+        // A recovery or confirmation code represents the session selected by
+        // the email link. Always exchange it, even when this browser still has
+        // an older anonymous or signed-in session.
+        const { error } = await client.auth.exchangeCodeForSession(code);
+        if (error) throw error;
+        return true;
+      }
+
+      // Admin invitations intentionally use Supabase's implicit callback
+      // because inviteUserByEmail cannot use PKCE: the administrator sends the
+      // invitation, while the invited person opens it in another browser.
+      // Consume the short-lived session once and let account.js immediately
+      // remove both tokens from the address bar.
+      const fragment = new URLSearchParams(callbackUrl.hash.replace(/^#/, ""));
+      const accessToken = fragment.get("access_token");
+      const refreshToken = fragment.get("refresh_token");
+      if (!accessToken || !refreshToken) return false;
+      const { error } = await client.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken
+      });
       if (error) throw error;
       return true;
     },

@@ -346,7 +346,11 @@ Deno.serve(async (request: Request) => {
     if (action === "resend_invite") {
       const { data: profile } = await admin.from("user_profiles").select("status").eq("user_id", targetId).maybeSingle();
       if (profile?.status !== "invited" || !target.user.email) throw new Error("invitation_unavailable");
-      const { error } = await admin.auth.admin.inviteUserByEmail(target.user.email, { redirectTo: authRedirect("signup") });
+      const { error } = await publicAuth.auth.resend({
+        type: "signup",
+        email: target.user.email,
+        options: { emailRedirectTo: authRedirect("signup") },
+      });
       if (error) throw new Error("invite_resend_failed");
       await writeAudit(actor.id, targetId, "account.invite_resend", true, "");
     } else if (action === "send_password_reset") {

@@ -18,6 +18,8 @@ assert.match(edge, /admin_complete_account_invitation/);
 assert.match(edge, /aoalb_invitation_operation_id/);
 assert.match(edge, /list_invitation_recovery/);
 assert.match(edge, /retry_invitation/);
+assert.match(edge, /publicAuth\.auth\.resend\(\{[\s\S]*type: "signup"/);
+assert.doesNotMatch(edge, /action === "resend_invite"[\s\S]{0,500}inviteUserByEmail/);
 assert.match(edge, /existingOperationId === operationId/);
 assert.match(edge, /findUserByInvitationOperation/);
 assert.match(edge, /row\.status === "requested" && !discoveredUser/);

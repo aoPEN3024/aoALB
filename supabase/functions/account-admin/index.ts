@@ -146,6 +146,14 @@ async function findUserByInvitationOperation(operationId: string) {
   throw new Error("auth_list_limit_reached");
 }
 
+async function getVerifiedInvitationUser(operationId: string, userId: string) {
+  const { data, error } = await admin.auth.admin.getUserById(userId);
+  if (error || !data?.user) return null;
+  return String(data.user.user_metadata?.aoalb_invitation_operation_id || "") === operationId
+    ? data.user
+    : null;
+}
+
 async function completeInvitation(actorId: string, operationId: string) {
   const { data, error } = await admin.rpc("admin_complete_account_invitation", {
     p_actor_user_id: actorId,
@@ -167,21 +175,19 @@ async function listInvitationRecovery() {
     const discoveredUser = row.auth_user_id ? null : await findUserByInvitationOperation(row.operation_id);
     if (row.status === "requested" && !discoveredUser) continue;
     const targetUserId = row.auth_user_id || discoveredUser?.id || null;
-    let email = "";
-    if (targetUserId) {
-      const result = discoveredUser ? { data: { user: discoveredUser } } : await admin.auth.admin.getUserById(targetUserId);
-      email = result.data.user?.email ?? "";
-    }
+    const verifiedUser = discoveredUser || (targetUserId
+      ? await getVerifiedInvitationUser(row.operation_id, targetUserId)
+      : null);
     rows.push({
       operationId: row.operation_id,
       targetUserId,
       displayName: row.display_name,
-      email,
+      email: verifiedUser?.email ?? "",
       status: row.status,
       reasonCode: row.last_error_code,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
-      automaticallyRecoverable: row.status !== "manual_review" && Boolean(targetUserId),
+      automaticallyRecoverable: row.status !== "manual_review" && Boolean(verifiedUser),
     });
   }
   return rows;
@@ -328,6 +334,9 @@ Deno.serve(async (request: Request) => {
           p_actor_user_id: actor.id, p_operation_id: operationId, p_auth_user_id: discoveredUser.id,
         });
         if (recorded.error) throw new Error("invitation_auth_unverified");
+      } else {
+        const verifiedUser = await getVerifiedInvitationUser(operationId, operation.auth_user_id);
+        if (!verifiedUser) throw new Error("invitation_recovery_needs_review");
       }
       const result = await completeInvitation(actor.id, operationId);
       return response(origin, 200, { ok: true, recovered: true, targetUserId: result.target_user_id });

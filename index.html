@@ -546,6 +546,28 @@
     </form>
   </dialog>
 
+  <dialog id="system-admin-delete-dialog" class="project-delete-dialog">
+    <form id="system-admin-delete-form">
+      <div class="dialog-header">
+        <h2>アカウントを削除扱いにする</h2>
+        <button id="system-admin-delete-close" type="button" aria-label="閉じる">×</button>
+      </div>
+      <div class="project-delete-body">
+        <p class="danger-notice">写真・台帳・監査記録は保持したまま、この利用者を削除扱いにします。</p>
+        <p>削除扱いのアカウントは、通常画面から再開できません。</p>
+        <p>確認のため、次のメールアドレスを完全一致で入力してください。</p>
+        <p id="system-admin-delete-target" class="system-admin-email"></p>
+        <label class="project-delete-confirm">メールアドレス
+          <input id="system-admin-delete-confirm-email" type="email" autocomplete="off" autocapitalize="none" spellcheck="false">
+        </label>
+      </div>
+      <div class="project-delete-footer">
+        <button id="system-admin-delete-cancel" type="button" class="secondary">キャンセル</button>
+        <button id="system-admin-delete-submit" type="submit" class="local-delete-confirm-button" disabled>削除扱いにする</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="caption-editor" class="caption-editor">
     <form id="caption-editor-form" method="dialog">
       <div class="dialog-header"><h2>台帳文言を編集</h2><button id="caption-editor-close" type="button" aria-label="閉じる">×</button></div>
@@ -581,6 +603,6 @@
   </dialog>
 
   <script src="vendor/jszip.min.js"></script>
-  <script type="module" src="js/app.js?v=20260901-invite-callback2"></script>
+  <script type="module" src="js/app.js?v=20260902-admin-confirm1"></script>
 </body>
 </html>

@@ -55,11 +55,57 @@ export function initSystemAdminUI() {
   const usersRoot = document.getElementById("system-admin-users");
   const auditRoot = document.getElementById("system-admin-audit");
   const recoveryRoot = document.getElementById("system-admin-invitation-recovery");
+  const deleteDialog = document.getElementById("system-admin-delete-dialog");
+  const deleteForm = document.getElementById("system-admin-delete-form");
+  const deleteTarget = document.getElementById("system-admin-delete-target");
+  const deleteInput = document.getElementById("system-admin-delete-confirm-email");
+  const deleteSubmit = document.getElementById("system-admin-delete-submit");
+  const deleteCancel = document.getElementById("system-admin-delete-cancel");
+  const deleteClose = document.getElementById("system-admin-delete-close");
   let provider = null;
   let busy = false;
   let currentUserId = "";
   let pendingInviteOperationId = "";
   let pendingInviteSignature = "";
+  let pendingDeleteEmail = "";
+  let pendingDeleteResolve = null;
+
+  function finishDeleteConfirmation(value = null) {
+    const resolve = pendingDeleteResolve;
+    pendingDeleteResolve = null;
+    pendingDeleteEmail = "";
+    deleteInput.value = "";
+    deleteTarget.textContent = "";
+    deleteSubmit.disabled = true;
+    if (deleteDialog.open) deleteDialog.close();
+    resolve?.(value);
+  }
+
+  function requestDeleteConfirmation(email) {
+    if (!deleteDialog || pendingDeleteResolve) return Promise.resolve(null);
+    pendingDeleteEmail = email;
+    deleteTarget.textContent = email;
+    deleteInput.value = "";
+    deleteSubmit.disabled = true;
+    deleteDialog.showModal();
+    deleteInput.focus();
+    return new Promise(resolve => { pendingDeleteResolve = resolve; });
+  }
+
+  deleteInput.addEventListener("input", () => {
+    deleteSubmit.disabled = deleteInput.value !== pendingDeleteEmail;
+  });
+  deleteForm.addEventListener("submit", event => {
+    event.preventDefault();
+    if (deleteInput.value !== pendingDeleteEmail) return;
+    finishDeleteConfirmation(deleteInput.value);
+  });
+  deleteCancel.addEventListener("click", () => finishDeleteConfirmation());
+  deleteClose.addEventListener("click", () => finishDeleteConfirmation());
+  deleteDialog.addEventListener("cancel", event => {
+    event.preventDefault();
+    finishDeleteConfirmation();
+  });
 
   const setMessage = (value = "", error = false) => {
     message.textContent = value;
@@ -144,8 +190,8 @@ export function initSystemAdminUI() {
         actions.append(actionButton("再設定メールを送る", () => run("再設定メールを送信", () => invoke({ action: "send_password_reset", targetUserId: user.userId }))));
       }
       if (!user.systemAdmin && user.userId !== currentUserId && user.status !== "deleted") {
-        actions.append(actionButton("削除扱いにする", () => {
-          const entered = prompt(`写真・台帳・監査記録は保持したまま、この利用者を削除扱いにします。通常画面からは再開できません。確認のためメールアドレスを入力してください。\n${user.email}`);
+        actions.append(actionButton("削除扱いにする", async () => {
+          const entered = await requestDeleteConfirmation(user.email);
           if (entered === null) return;
           run("アカウントを削除扱いに変更", () => invoke({ action: "delete_equivalent", targetUserId: user.userId, confirmEmail: entered }));
         }, "danger-outline"));

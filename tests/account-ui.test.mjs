@@ -52,8 +52,8 @@ assert.match(account, /supabase-provider\.js\?v=20260901-invite-callback2/);
 assert.match(sharing, /supabase-provider\.js\?v=20260901-invite-callback2/);
 assert.match(app, /sharing\.js\?v=20260901-invite-callback2/);
 assert.match(app, /account\.js\?v=20260901-invite-callback2/);
-assert.match(app, /system-admin\.js\?v=20260901-invite-callback2/);
-assert.match(html, /app\.js\?v=20260901-invite-callback2/);
+assert.match(app, /system-admin\.js\?v=20260902-admin-confirm1/);
+assert.match(html, /app\.js\?v=20260902-admin-confirm1/);
 assert.match(account, /AUTH_FRAGMENT_PARAMS[\s\S]*access_token[\s\S]*refresh_token/);
 assert.match(account, /isAuthFragment \? "#sharing"/);
 assert.match(html, /id="sharing-admin-claim-message"/);
@@ -63,7 +63,7 @@ assert.match(authUrlGuide, /Site URL: `https:\/\/aopen3024\.github\.io\/aoALB\/`
 assert.match(authUrlGuide, /Redirect URL: `https:\/\/aopen3024\.github\.io\/aoALB\/`/);
 assert.match(storage, /db\.transaction\(stores, "readwrite"\)/);
 assert.match(storage, /sources\.has\("zip"\)/);
-for (const id of ["account-login-form", "account-invite-note", "account-reset-form", "account-clear-device", "account-auth-recovery", "system-admin-panel", "system-admin-invitation-recovery", "sharing-create-form"]) {
+for (const id of ["account-login-form", "account-invite-note", "account-reset-form", "account-clear-device", "account-auth-recovery", "system-admin-panel", "system-admin-invitation-recovery", "system-admin-delete-dialog", "system-admin-delete-form", "system-admin-delete-confirm-email", "sharing-create-form"]) {
   assert.match(html, new RegExp(`id="${id}"`));
 }
 assert.doesNotMatch(html, /id="account-signup-form"|id="account-upgrade-form"/);
@@ -75,7 +75,10 @@ assert.match(systemAdmin, /crypto\.randomUUID\(\)/);
 assert.match(systemAdmin, /pendingInviteOperationId/);
 assert.match(systemAdmin, /retry_invitation/);
 assert.match(systemAdmin, /自動修復しません/);
-assert.match(systemAdmin, /通常画面からは再開できません/);
+assert.match(html, /通常画面から再開できません/);
+assert.match(systemAdmin, /requestDeleteConfirmation/);
+assert.match(systemAdmin, /deleteInput\.value !== pendingDeleteEmail/);
+assert.doesNotMatch(systemAdmin, /\bprompt\s*\(/);
 assert.doesNotMatch(systemAdmin, /innerHTML|console\.(log|error|warn)|service_role|sb_secret_/i);
 assert.match(account, /classifyAuthFailure/);
 assert.match(account, /AUTH_CALLBACK_PARAMS\.forEach/);

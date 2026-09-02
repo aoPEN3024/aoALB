@@ -11,7 +11,7 @@ import { loadPhotoAsset, syncCloudTrash } from "./cloud/receiver.js";
 import { photoDeleteConfirmation, photoSourceKind } from "./photo-delete.js";
 import { CLASSIFICATION_FIELDS, effectiveClassification, hasClassificationOverride } from "./classification.js";
 import { initAccountUI } from "./account.js?v=20260901-invite-callback2";
-import { initSystemAdminUI } from "./system-admin.js?v=20260901-invite-callback2";
+import { initSystemAdminUI } from "./system-admin.js?v=20260902-admin-confirm1";
 import { initCloudLedgerSyncUI } from "./cloud/ledger-sync.js?v=20260805-ledger1";
 
 const views = ["import", "projects", "photos", "ledgers", "history", "sharing"];

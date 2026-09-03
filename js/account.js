@@ -1,5 +1,5 @@
 import { loadCloudConfig, loadLocalCloudConfig } from "./cloud/config.js";
-import { createSupabaseProvider } from "./cloud/supabase-provider.js?v=20260817-auth-guidance1";
+import { createSupabaseProvider } from "./cloud/supabase-provider.js?v=20260901-invite-callback2";
 import { clearSharedDeviceData, getCloudChanges } from "./storage.js";
 
 const DEVICE_KEY = "aoALB:accountDeviceUid";
@@ -11,6 +11,15 @@ const PASSWORD_MODE_RECOVERY = "recovery";
 const PASSWORD_MODE_SIGNUP = "signup";
 
 const AUTH_CALLBACK_PARAMS = ["code", "state", "error", "error_code", "error_description", "token", "token_hash", "type", "authAction"];
+const AUTH_FRAGMENT_PARAMS = ["access_token", "refresh_token", "expires_at", "expires_in", "provider_token", "provider_refresh_token", "token_type", "type", "error", "error_code", "error_description"];
+
+function authFragment(url) {
+  return new URLSearchParams(String(url?.hash || "").replace(/^#/, ""));
+}
+
+function callbackParam(url, name) {
+  return url?.searchParams?.get(name) || authFragment(url).get(name) || "";
+}
 
 function safeError(message) {
   const error = new Error(message);
@@ -19,9 +28,9 @@ function safeError(message) {
 }
 
 export function classifyAuthFailure(error, callbackUrl = null, authAction = "") {
-  const code = String(error?.code || callbackUrl?.searchParams?.get("error_code") || "").toLowerCase();
+  const code = String(error?.code || callbackParam(callbackUrl, "error_code") || "").toLowerCase();
   const name = String(error?.name || "").toLowerCase();
-  const detail = String(error?.message || callbackUrl?.searchParams?.get("error_description") || "").toLowerCase();
+  const detail = String(error?.message || callbackParam(callbackUrl, "error_description") || "").toLowerCase();
   const action = [PASSWORD_MODE_RECOVERY, PASSWORD_MODE_UPGRADE, PASSWORD_MODE_SIGNUP].includes(authAction) ? authAction : "";
   if (name === "typeerror" || /failed to fetch|network|offline|load failed/.test(detail)) {
     return { code: "network", action, message: "通信できませんでした。接続を確認して、もう一度お試しください。" };
@@ -35,8 +44,11 @@ export function classifyAuthFailure(error, callbackUrl = null, authAction = "") 
   if (code === "otp_expired" || /expired|already used|has been used|one-time/.test(detail)) {
     return { code: "link_expired", action, message: "このリンクは使用済み、または有効期限が切れています。最新のメールからやり直してください。" };
   }
-  if (callbackUrl?.searchParams?.has("code") || callbackUrl?.searchParams?.has("error") || /invalid.*(code|link|token)|access denied/.test(detail)) {
+  if (callbackParam(callbackUrl, "code") || callbackParam(callbackUrl, "error") || /invalid.*(code|link|token)|access denied/.test(detail)) {
     return { code: "invalid_link", action, message: "この認証リンクを確認できませんでした。最新のメールからやり直してください。" };
+  }
+  if (code === "user_banned" || /user.*banned|account.*(?:suspended|disabled)/.test(detail)) {
+    return { code: "account_suspended", action, message: "このアカウントは利用停止中です。管理者へ確認してください。" };
   }
   if (code === "invalid_credentials" || /invalid login credentials/.test(detail)) {
     return { code: "invalid_credentials", action, message: "メールアドレスまたはパスワードを確認してください。" };
@@ -65,19 +77,20 @@ function redirectUrl(authAction = "") {
 function clearAuthCallbackUrl() {
   const url = new URL(location.href);
   AUTH_CALLBACK_PARAMS.forEach(name => url.searchParams.delete(name));
-  history.replaceState(history.state, "", `${url.pathname}${url.search}${url.hash || "#sharing"}`);
+  const fragment = authFragment(url);
+  const isAuthFragment = AUTH_FRAGMENT_PARAMS.some(name => fragment.has(name));
+  history.replaceState(history.state, "", `${url.pathname}${url.search}${isAuthFragment ? "#sharing" : (url.hash || "#sharing")}`);
 }
 
 export function initAccountUI() {
   const byId = id => document.getElementById(id);
   const ui = {
     panel: byId("account-panel"), state: byId("account-state"), message: byId("account-message"),
-    login: byId("account-login-form"), signup: byId("account-signup-form"),
-    upgrade: byId("account-upgrade-form"), reset: byId("account-reset-form"),
+    login: byId("account-login-form"), reset: byId("account-reset-form"),
     password: byId("account-new-password-form"), signedIn: byId("account-signed-in"),
     email: byId("account-current-email"), devices: byId("account-device-list"),
     logout: byId("account-logout"), clear: byId("account-clear-device"),
-    guide: byId("account-session-guide"), upgradeTitle: byId("account-upgrade-title"), upgradeNote: byId("account-upgrade-note"),
+    guide: byId("account-session-guide"), inviteNote: byId("account-invite-note"),
     authRecovery: byId("account-auth-recovery"), authRecoveryMessage: byId("account-auth-recovery-message"),
     resendConfirmation: byId("account-resend-confirmation"), resendPassword: byId("account-resend-password"),
     backToLogin: byId("account-back-to-login")
@@ -94,7 +107,7 @@ export function initAccountUI() {
   };
   const formValue = (form, name) => String(new FormData(form).get(name) || "");
   const validPassword = value => value.length >= 10 && value.length <= 72;
-  const accountForms = [ui.login, ui.signup, ui.upgrade, ui.reset, ui.password].filter(Boolean);
+  const accountForms = [ui.login, ui.reset, ui.password].filter(Boolean);
   const clearSecrets = (...roots) => roots.flat().filter(Boolean).forEach(root => {
     root.querySelectorAll('input[type="password"]').forEach(input => { input.value = ""; });
   });
@@ -115,17 +128,21 @@ export function initAccountUI() {
     if (!config) throw safeError("共有機能の接続設定がありません。端末内モードは引き続き利用できます。");
     provider = await createSupabaseProvider(config);
     const callbackUrl = new URL(location.href);
-    const hasCallback = AUTH_CALLBACK_PARAMS.some(name => callbackUrl.searchParams.has(name));
+    const callbackFragment = authFragment(callbackUrl);
+    const hasCallback = AUTH_CALLBACK_PARAMS.some(name => callbackUrl.searchParams.has(name))
+      || AUTH_FRAGMENT_PARAMS.some(name => callbackFragment.has(name));
     if (hasCallback) {
-      const authAction = callbackUrl.searchParams.get("authAction") || "";
+      const authAction = callbackParam(callbackUrl, "authAction");
       try {
-        if (callbackUrl.searchParams.has("error")) {
+        if (callbackParam(callbackUrl, "error")) {
           const callbackError = new Error("Authentication callback rejected");
-          callbackError.code = callbackUrl.searchParams.get("error_code") || "callback_rejected";
+          callbackError.code = callbackParam(callbackUrl, "error_code") || "callback_rejected";
           throw callbackError;
         }
         await provider.consumeAuthCallback(location.href);
-        if (authAction === PASSWORD_MODE_RECOVERY) localStorage.setItem(PENDING_PASSWORD_KEY, PASSWORD_MODE_RECOVERY);
+        if ([PASSWORD_MODE_RECOVERY, PASSWORD_MODE_SIGNUP].includes(authAction)) {
+          localStorage.setItem(PENDING_PASSWORD_KEY, authAction);
+        }
       } catch (error) {
         authNotice = classifyAuthFailure(error, callbackUrl, authAction);
       } finally {
@@ -145,10 +162,9 @@ export function initAccountUI() {
       setMessage(sessionFailure.message, true);
     }
     ui.login.hidden = Boolean(session);
-    ui.signup.hidden = Boolean(session);
     ui.reset.hidden = Boolean(session);
-    ui.upgrade.hidden = !session?.anonymous;
     ui.signedIn.hidden = !session || session.anonymous;
+    ui.inviteNote.hidden = Boolean(session);
     ui.guide.hidden = true;
     const pendingPasswordMode = localStorage.getItem(PENDING_PASSWORD_KEY);
     ui.password.hidden = !(session && !session.anonymous && ["1", PASSWORD_MODE_UPGRADE, PASSWORD_MODE_RECOVERY].includes(pendingPasswordMode));
@@ -157,21 +173,39 @@ export function initAccountUI() {
         ? "このブラウザのログイン情報を確認できません。"
         : "このブラウザには、引き継げる利用情報がありません。";
       ui.guide.hidden = false;
-      ui.guide.textContent = "新しいアカウントを作成した後、共有工事へ入り直してください。一般メンバーは工事IDと工事PASS、管理者は工事IDと管理者PASSを使います。会社PASSは新しい工事を作る場合だけ使用します。別のブラウザや以前の端末で作成したアカウントがある場合は、新規作成せず、そのアカウントでログインしてください。ZIP取込みと端末内台帳はログインなしでも利用できます。";
+      ui.guide.textContent = "共有工事を使うアカウントは管理者から招待を受けてください。以前の端末で作成済みのアカウントがある場合は、そのアカウントでログインしてください。ZIP取込みと端末内台帳はログインなしでも利用できます。";
+      window.dispatchEvent(new CustomEvent("aoalb:account-context", { detail: { active: false, status: "signed_out", systemAdmin: false } }));
       renderAuthNotice();
       return;
     }
     if (session.anonymous) {
-      const memberships = await provider.listMySites().catch(() => null);
-      const canDescribeTransfer = Array.isArray(memberships) && memberships.length > 0;
-      ui.upgradeTitle.textContent = canDescribeTransfer
-        ? "この端末の利用情報をアカウントへ引き継ぐ" : "この端末の利用をアカウントに変更";
-      ui.upgradeNote.textContent = canDescribeTransfer
-        ? "現在このブラウザで利用している工事の所属と権限を、同じ利用者のままアカウントへ変更します。"
-        : "この匿名セッションには所属工事が確認できません。アカウントへ変更しても、引き継がれる工事はありません。";
-      ui.state.textContent = canDescribeTransfer
-        ? "このブラウザの匿名利用情報を確認しました。同じ利用者のままアカウントへ変更できます。"
-        : "このブラウザは匿名利用中ですが、所属工事は確認できません。";
+      ui.state.textContent = "共有工事を利用するには、管理者から招待されたアカウントでログインしてください。";
+      ui.guide.hidden = false;
+      ui.guide.textContent = "以前の匿名利用情報は自動統合しません。ログアウト後、招待済みアカウントでログインし、工事IDと工事PASSまたは管理者PASSで入り直してください。";
+      ui.signedIn.hidden = false;
+      ui.email.textContent = "以前の匿名利用状態";
+      ui.devices.replaceChildren();
+      window.dispatchEvent(new CustomEvent("aoalb:account-context", { detail: { active: false, status: "anonymous", systemAdmin: false } }));
+      renderAuthNotice();
+      return;
+    }
+    const context = await provider.getAccountContext().catch(() => null);
+    const status = context?.status || "unregistered";
+    const isInvited = status === "invited";
+    ui.password.hidden = !isInvited && !(session && ["1", PASSWORD_MODE_RECOVERY].includes(pendingPasswordMode));
+    if (isInvited) {
+      ui.state.textContent = "招待を確認しました。パスワードを設定すると共有工事を利用できます。";
+      ui.signedIn.hidden = true;
+      ui.inviteNote.hidden = true;
+      window.dispatchEvent(new CustomEvent("aoalb:account-context", { detail: { active: false, status, systemAdmin: false } }));
+      renderAuthNotice();
+      return;
+    }
+    if (status !== "active") {
+      ui.state.textContent = status === "suspended" ? "このアカウントは利用停止中です。管理者へ確認してください。" : "このアカウントは共有工事を利用できません。管理者へ確認してください。";
+      ui.guide.hidden = false;
+      ui.guide.textContent = "ZIP取込みと端末内台帳は引き続き利用できます。";
+      window.dispatchEvent(new CustomEvent("aoalb:account-context", { detail: { active: false, status, systemAdmin: false } }));
       renderAuthNotice();
       return;
     }
@@ -183,6 +217,10 @@ export function initAccountUI() {
       li.textContent = `${row.display_name}（最終利用 ${new Date(row.last_seen_at).toLocaleString("ja-JP")}）`;
       return li;
     }));
+    window.dispatchEvent(new CustomEvent("aoalb:account-context", { detail: {
+      active: true, status, systemAdmin: context.systemAdmin === true,
+      displayName: context.displayName, userId: context.userId
+    } }));
     renderAuthNotice();
   }
 
@@ -198,6 +236,8 @@ export function initAccountUI() {
     event.preventDefault(); run(async () => {
       const p = await getProvider();
       const signedIn = await p.signInWithPassword({ email: formValue(ui.login, "email"), password: formValue(ui.login, "password") });
+      const context = await p.getAccountContext();
+      if (!context || context.status !== "active") throw safeError(context?.status === "suspended" ? "このアカウントは利用停止中です。" : "管理者から招待された有効なアカウントを確認できません。");
       const name = formValue(ui.login, "deviceName") || "この端末";
       localStorage.setItem(DEVICE_NAME_KEY, name);
       await p.ensureAccountProfile({ displayName: signedIn.displayName || name, deviceUid: deviceUid(), deviceName: name });
@@ -205,28 +245,6 @@ export function initAccountUI() {
       ui.login.reset(); setMessage("ログインしました。共有工事を読み込むため画面を更新します。");
       setTimeout(() => location.reload(), 250);
     }, { clear: [ui.login] });
-  });
-  ui.signup.addEventListener("submit", event => {
-    event.preventDefault(); run(async () => {
-      const password = formValue(ui.signup, "password");
-      if (!validPassword(password) || password !== formValue(ui.signup, "confirmation")) throw safeError("10文字以上の同じパスワードを2回入力してください。");
-      const result = await (await getProvider()).signUpWithPassword({
-        email: formValue(ui.signup, "email"), password,
-        displayName: formValue(ui.signup, "displayName"), redirectTo: redirectUrl(PASSWORD_MODE_SIGNUP)
-      });
-      ui.signup.reset();
-      setMessage(result.confirmationRequired ? "確認メールを送りました。メール内のリンクを開いてください。" : "アカウントを作成しました。");
-    }, { clear: [ui.signup] });
-  });
-  ui.upgrade.addEventListener("submit", event => {
-    event.preventDefault(); run(async () => {
-      await (await getProvider()).beginAnonymousUpgrade({
-        email: formValue(ui.upgrade, "email"), displayName: formValue(ui.upgrade, "displayName"), redirectTo: redirectUrl(PASSWORD_MODE_UPGRADE)
-      });
-      localStorage.setItem(PENDING_PASSWORD_KEY, PASSWORD_MODE_UPGRADE);
-      ui.upgrade.reset();
-      setMessage("確認メールを送りました。メール内のリンクを開いた後、パスワードを設定してください。現在の工事と権限は維持されます。");
-    });
   });
   ui.reset.addEventListener("submit", event => {
     event.preventDefault(); run(async () => {
@@ -240,13 +258,17 @@ export function initAccountUI() {
       if (!validPassword(password) || password !== formValue(ui.password, "confirmation")) throw safeError("10文字以上の同じパスワードを2回入力してください。");
       const passwordMode = localStorage.getItem(PENDING_PASSWORD_KEY);
       await (await getProvider()).updatePassword(password, {
-        allowAlreadySet: passwordMode === PASSWORD_MODE_UPGRADE || passwordMode === "1"
+        allowAlreadySet: passwordMode === "1"
       });
       const name = localStorage.getItem(DEVICE_NAME_KEY) || "この端末";
       const session = await provider.getAccountSession();
+      const context = await provider.getAccountContext();
+      if (context?.status === "invited") await provider.activateInvitedAccount(session?.displayName || context.displayName || name);
       await provider.ensureAccountProfile({ displayName: session?.displayName || name, deviceUid: deviceUid(), deviceName: name });
       localStorage.removeItem(PENDING_PASSWORD_KEY);
-      ui.password.reset(); setMessage("パスワードを設定しました。");
+      localStorage.setItem(MODE_KEY, "cloud");
+      ui.password.reset(); setMessage("パスワードを設定しました。共有工事を読み込むため画面を更新します。");
+      setTimeout(() => location.reload(), 250);
     }, { clear: [ui.password] });
   });
   ui.logout.addEventListener("click", () => run(async () => {
@@ -267,11 +289,8 @@ export function initAccountUI() {
 
   ui.resendConfirmation.addEventListener("click", () => {
     authNotice = null; renderAuthNotice(); clearSecrets(accountForms);
-    const target = ui.upgrade.hidden ? ui.signup : ui.upgrade;
-    target.querySelector('input[type="email"]')?.focus();
-    setMessage(target === ui.upgrade
-      ? "このブラウザの匿名利用から、同じメールアドレスを入力して確認メールをもう一度送ってください。"
-      : "同じメールアドレスとパスワードを入力し、確認メールをもう一度送ってください。");
+    ui.login.querySelector('input[type="email"]')?.focus();
+    setMessage("招待メールを再送する場合は、システム管理者へ依頼してください。");
   });
   ui.resendPassword.addEventListener("click", () => {
     authNotice = null; renderAuthNotice(); clearSecrets(accountForms);

@@ -2,7 +2,7 @@ import { loadCloudConfig, loadLocalCloudConfig, saveCloudConfig } from "./cloud/
 import { MockSiteProvider } from "./cloud/mock-provider.js";
 import { detectNetworkStatus, formatTransferBytes, networkLabel, NETWORK_STATUS, shouldAutoSync } from "./cloud/network.js";
 import { classifyPhotoSyncError, createPhotoPackage } from "./cloud/photo-sync.js";
-import { createSupabaseProvider } from "./cloud/supabase-provider.js?v=20260817-auth-guidance1";
+import { createSupabaseProvider } from "./cloud/supabase-provider.js?v=20260901-invite-callback2";
 import {
   cacheAllOriginals, clearCurrentSiteCloudCache, cloudDownloadSummary,
   configureCloudReceiver, disconnectCloudReceiver, syncCloudPhotos
@@ -47,6 +47,12 @@ export function initSiteSharing() {
     adminClaimForm: byId("sharing-admin-claim-form"), adminClaimSiteCode: byId("sharing-admin-claim-site-code"),
     adminClaimCode: byId("sharing-admin-claim-code"), adminClaimDevice: byId("sharing-admin-claim-device"),
     adminClaimMessage: byId("sharing-admin-claim-message"),
+    operationMenu: byId("sharing-operation-menu"), createPanel: byId("sharing-create-panel"),
+    joinPanel: byId("sharing-join-panel"), adminClaimPanel: byId("sharing-admin-claim-panel"),
+    createForm: byId("sharing-create-form"), createName: byId("sharing-create-name"),
+    createCode: byId("sharing-create-code"), createJoinCode: byId("sharing-create-join-code"),
+    createAdminCode: byId("sharing-create-admin-code"), createAdminConfirm: byId("sharing-create-admin-confirm"),
+    createDevice: byId("sharing-create-device"),
     sitesPanel: byId("sharing-site-list-panel"), sites: byId("sharing-site-list"),
     sitesEmpty: byId("sharing-site-list-empty"), nonAdminNote: byId("sharing-non-admin-note"),
     openAdminClaim: byId("sharing-open-admin-claim"), adminCodeUnavailable: byId("sharing-admin-code-unavailable"),
@@ -89,9 +95,12 @@ export function initSiteSharing() {
   let receiveQueued = false;
   let memberships = [];
   let siteStatusFilter = "active";
+  let accountActive = false;
+  let selectedOperation = "sites";
   const sharingSecrets = [
     ui.publishableKey, ui.joinCode, ui.adminClaimCode, ui.adminJoinCode,
-    ui.adminJoinConfirm, ui.adminAccessCode, ui.adminAccessConfirm
+    ui.adminJoinConfirm, ui.adminAccessCode, ui.adminAccessConfirm,
+    ui.createJoinCode, ui.createAdminCode, ui.createAdminConfirm
   ].filter(Boolean);
   const clearSharingSecrets = (...inputs) => inputs.flat().filter(Boolean).forEach(input => { input.value = ""; });
 
@@ -125,7 +134,8 @@ export function initSiteSharing() {
   }
 
   async function ensureMembershipAuth() {
-    const auth = await provider.authenticate({ allowAnonymous: true });
+    if (!accountActive) throw new Error("有効なアカウントでログインしてください。");
+    const auth = await provider.authenticate({ allowAnonymous: false });
     if (identity?.userId && identity.userId !== auth.userId) identity = null;
     identity = {
       ...(identity || {}),
@@ -277,7 +287,12 @@ export function initSiteSharing() {
     ui.nonAdminNote.hidden = !joined || admin;
     ui.adminCodeUnavailable.hidden = !joined || Boolean(identity?.adminCodeConfigured);
     ui.openAdminClaim.hidden = !identity?.adminCodeConfigured;
-    ui.sitesPanel.hidden = !provider || memberships.length === 0;
+    const accountCloudReady = accountActive && Boolean(provider) && mode === "cloud";
+    ui.operationMenu.hidden = !accountCloudReady;
+    ui.createPanel.hidden = !accountCloudReady || selectedOperation !== "create";
+    ui.joinPanel.hidden = !accountCloudReady || selectedOperation !== "join";
+    ui.adminClaimPanel.hidden = !accountCloudReady || selectedOperation !== "admin";
+    ui.sitesPanel.hidden = !accountCloudReady || selectedOperation !== "sites";
     renderSiteList();
     if (admin) {
       if (document.activeElement !== ui.adminName) ui.adminName.value = identity.siteName || "";
@@ -626,6 +641,50 @@ export function initSiteSharing() {
       setMessage(error?.message || "接続設定を保存できませんでした。", true);
     }
   });
+  document.querySelectorAll("[data-sharing-operation]").forEach(button => button.addEventListener("click", async () => {
+    selectedOperation = button.dataset.sharingOperation;
+    clearSharingSecrets(sharingSecrets);
+    await renderStatus();
+    const target = selectedOperation === "create" ? ui.createName
+      : selectedOperation === "join" ? ui.siteCode
+      : selectedOperation === "admin" ? ui.adminClaimSiteCode : null;
+    target?.focus();
+  }));
+  ui.createForm.addEventListener("submit", async event => {
+    event.preventDefault();
+    if (!provider?.createSiteForAccount) return setMessage("先にアカウントでログインしてください。", true);
+    if (siteSwitching) return;
+    siteSwitching = true;
+    try {
+      await ensureMembershipAuth();
+      const adminCode = validateAdminCode(ui.createAdminCode.value, ui.createAdminConfirm.value);
+      const joinCode = String(ui.createJoinCode.value || "");
+      if (joinCode.length < 8 || joinCode.length > 64 || /[\s\u0000-\u001f\u007f]/.test(joinCode)) {
+        throw new Error("工事PASSは空白を含まない8～64文字で設定してください。");
+      }
+      const membership = await provider.createSiteForAccount({
+        siteName: ui.createName.value.trim(), siteCode: ui.createCode.value.trim(),
+        joinCode, adminCode, deviceName: ui.createDevice.value.trim() || "この端末"
+      });
+      identity = { ...identity, ...membership };
+      await refreshMemberships();
+      await saveCloudIdentity(identity);
+      subscribeCurrentSite();
+      if (sharingMode() === "cloud") {
+        configureCloudReceiver(provider, identity);
+        configureCloudLedgerSync(provider, identity);
+      }
+      ui.createForm.reset();
+      selectedOperation = "sites";
+      setMessage(`${membership.siteName}を作成し、管理者として接続しました。`);
+    } catch (error) {
+      setMessage(error?.message || "工事を作成できませんでした。", true);
+    } finally {
+      clearSharingSecrets(ui.createJoinCode, ui.createAdminCode, ui.createAdminConfirm);
+      siteSwitching = false;
+      await renderStatus();
+    }
+  });
   ui.joinForm.addEventListener("submit", async event => {
     event.preventDefault();
     if (!provider) return setMessage("先に工事の共有を開始してください。", true);
@@ -696,6 +755,8 @@ export function initSiteSharing() {
     }
   });
   ui.openAdminClaim.addEventListener("click", () => {
+    selectedOperation = "admin";
+    renderStatus();
     ui.adminClaimSiteCode.value = identity?.siteCode || "";
     ui.adminClaimDevice.value = identity?.deviceName || "";
     clearSharingSecrets(ui.adminClaimCode);
@@ -848,7 +909,7 @@ export function initSiteSharing() {
     const config = loadCloudConfig();
     ui.projectUrl.value = config?.projectUrl || "";
     ui.publishableKey.value = "";
-    if (sharingMode() === "cloud" && !hasStoredAuthSession()) {
+    if (sharingMode() === "cloud" && (!hasStoredAuthSession() || !accountActive)) {
       localStorage.setItem(MODE_KEY, "local");
       setMessage("この端末だけで開始しました。工事を共有する場合は「工事の共有を開始」を押してください。");
       await connect("local");
@@ -873,6 +934,13 @@ export function initSiteSharing() {
     active = false;
   }
 
+  const handleAccountContext = event => {
+    accountActive = event.detail?.active === true;
+    if (!accountActive) selectedOperation = "sites";
+    renderStatus().catch(() => {});
+  };
+  window.addEventListener("aoalb:account-context", handleAccountContext);
+
   return {
     activate,
     deactivate,
@@ -884,6 +952,7 @@ export function initSiteSharing() {
         mode: sharingMode()
       };
     },
-    refreshCloudPhotos
+    refreshCloudPhotos,
+    destroy() { window.removeEventListener("aoalb:account-context", handleAccountContext); }
   };
 }

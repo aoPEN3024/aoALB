@@ -10,7 +10,7 @@
   <link rel="icon" type="image/png" sizes="16x16" href="assets/brand/favicon-16-v1.png">
   <link rel="icon" type="image/png" sizes="32x32" href="assets/brand/favicon-32-v1.png">
   <link rel="apple-touch-icon" sizes="180x180" href="assets/brand/apple-touch-icon-v1.png">
-  <link rel="stylesheet" href="css/app.css?v=20260804-classification2">
+  <link rel="stylesheet" href="css/app.css?v=20260901-invite-callback2">
   <link rel="stylesheet" href="css/print.css" media="print">
 </head>
 <body>
@@ -163,21 +163,11 @@
               <label>この端末の名前<input name="deviceName" type="text" maxlength="80" placeholder="事務所PC"></label>
               <button type="submit" class="primary">ログイン</button>
             </form>
-            <form id="account-signup-form" class="sharing-form account-form">
-              <h3>アカウントを作成</h3>
-              <label>表示名<input name="displayName" type="text" required maxlength="80" autocomplete="name"></label>
-              <label>メールアドレス<input name="email" type="email" required autocomplete="email"></label>
-              <label>パスワード<input name="password" type="password" required minlength="10" maxlength="72" autocomplete="new-password"></label>
-              <label>パスワード（確認）<input name="confirmation" type="password" required minlength="10" maxlength="72" autocomplete="new-password"></label>
-              <button type="submit" class="secondary">作成</button>
-            </form>
-            <form id="account-upgrade-form" class="sharing-form account-form" hidden>
-              <h3 id="account-upgrade-title">この端末の利用情報をアカウントへ引き継ぐ</h3>
-              <p id="account-upgrade-note" class="limit-note">現在このブラウザで利用している工事の所属と権限を、同じ利用者のままアカウントへ変更します。</p>
-              <label>表示名<input name="displayName" type="text" required maxlength="80"></label>
-              <label>メールアドレス<input name="email" type="email" required autocomplete="email"></label>
-              <button type="submit" class="primary">確認メールを送る</button>
-            </form>
+            <div id="account-invite-note" class="account-form">
+              <h3>アカウントが必要な場合</h3>
+              <p>利用者アカウントは管理者が招待します。自由な新規登録はできません。</p>
+              <p class="limit-note">招待メールを受け取った方は、メールのリンクからパスワードを設定してください。</p>
+            </div>
             <form id="account-reset-form" class="sharing-form account-form">
               <h3>パスワードを忘れた場合</h3>
               <label>メールアドレス<input name="email" type="email" required autocomplete="email"></label>
@@ -197,6 +187,41 @@
             </div>
           </div>
         </section>
+        <section id="system-admin-panel" class="sharing-card sharing-wide system-admin-panel" hidden>
+          <div class="system-admin-heading"><div><h2>利用者管理</h2><p class="limit-note">aoALBの利用者アカウントを管理します。工事の管理者権限とは別です。</p></div><button id="system-admin-refresh" type="button" class="secondary">最新にする</button></div>
+          <form id="system-admin-invite-form" class="sharing-form system-admin-invite">
+            <label>利用者名<input name="displayName" type="text" required maxlength="80" autocomplete="off"></label>
+            <label>メールアドレス<input name="email" type="email" required maxlength="254" autocomplete="off"></label>
+            <button type="submit" class="primary">招待メールを送る</button>
+          </form>
+          <p id="system-admin-message" class="sharing-message" role="status" aria-live="polite"></p>
+          <p class="limit-note">利用停止は再開できます。「削除扱い」は写真・台帳・監査を保持したまま利用を無効にし、通常画面からは再開できません。</p>
+          <details class="friendly-details" hidden><summary>復旧が必要な招待</summary><div id="system-admin-invitation-recovery" class="system-admin-users"></div></details>
+          <div id="system-admin-users" class="system-admin-users"></div>
+          <details class="friendly-details"><summary>管理操作履歴</summary><div id="system-admin-audit" class="system-admin-audit"></div></details>
+        </section>
+        <section id="sharing-operation-menu" class="sharing-card sharing-wide" hidden>
+          <h2>共有工事の操作</h2>
+          <div class="sharing-actions sharing-operation-buttons">
+            <button type="button" class="secondary" data-sharing-operation="sites">所属している工事</button>
+            <button type="button" class="secondary" data-sharing-operation="create">工事を作成</button>
+            <button type="button" class="secondary" data-sharing-operation="join">工事に参加</button>
+            <button type="button" class="secondary" data-sharing-operation="admin">管理者として入る</button>
+          </div>
+        </section>
+        <section id="sharing-create-panel" class="sharing-card sharing-wide" hidden>
+          <h2>工事を作成する</h2>
+          <form id="sharing-create-form" class="sharing-form sharing-create-form">
+            <label>工事名<input id="sharing-create-name" type="text" maxlength="160" required></label>
+            <label>工事ID<input id="sharing-create-code" type="text" maxlength="40" required autocomplete="off"></label>
+            <label>工事PASS<input id="sharing-create-join-code" type="password" minlength="8" maxlength="64" required autocomplete="off"></label>
+            <label>管理者PASS<input id="sharing-create-admin-code" type="password" minlength="8" maxlength="64" required autocomplete="off"></label>
+            <label>管理者PASS（確認）<input id="sharing-create-admin-confirm" type="password" minlength="8" maxlength="64" required autocomplete="off"></label>
+            <label>この端末の名前<input id="sharing-create-device" type="text" maxlength="80" required autocomplete="off"></label>
+            <button type="submit" class="primary">工事を作成</button>
+          </form>
+          <p class="limit-note">工事PASSはメンバー参加用、管理者PASSは管理者権限の復旧用です。</p>
+        </section>
         <section class="sharing-card sharing-wide">
           <h2>台帳・分類の同期</h2>
           <p id="ledger-sync-message" class="sharing-status">確認しています…</p>
@@ -209,16 +234,16 @@
           <div class="sharing-actions"><button id="sharing-local-mode" type="button" class="secondary">この端末だけで使う</button></div>
           <button id="sharing-mock-mode" type="button" class="tech-only" tabindex="-1">端末内試作</button>
         </section>
-        <section class="sharing-card sharing-wide">
+        <section id="sharing-connection-panel" class="sharing-card sharing-wide">
           <h2>工事の共有を始める</h2>
-          <p>公開設定が済んでいるため、工事IDと工事PASSだけで始められます。</p>
+          <p>招待されたアカウントでログインすると、工事の作成・参加・管理者としての再接続を選べます。</p>
           <form id="sharing-config-form" class="sharing-form">
             <div class="tech-only"><label>接続先<input id="sharing-project-url" type="url" autocomplete="off"></label>
             <label>接続キー<input id="sharing-publishable-key" type="password" autocomplete="off"></label></div>
             <button type="submit" class="secondary">工事の共有を開始</button>
           </form>
         </section>
-        <section class="sharing-card sharing-wide">
+        <section id="sharing-join-panel" class="sharing-card sharing-wide" hidden>
           <h2>工事に参加する</h2>
           <form id="sharing-join-form" class="sharing-form sharing-join-form">
             <label>工事ID<input id="sharing-site-code" type="text" maxlength="40" autocomplete="off" placeholder="KUKI-A-2026"></label>
@@ -233,7 +258,7 @@
             <div><dt>送信待ち</dt><dd id="sharing-pending-count">0件</dd></div>
           </dl>
         </section>
-        <section class="sharing-card sharing-wide">
+        <section id="sharing-admin-claim-panel" class="sharing-card sharing-wide" hidden>
           <h2>管理者として入る</h2>
           <p class="limit-note">工事ごとの管理者PASSを使います。一般社員用の工事PASSや、会社共通の会社PASSとは異なります。</p>
           <form id="sharing-admin-claim-form" class="sharing-form sharing-join-form">
@@ -521,6 +546,28 @@
     </form>
   </dialog>
 
+  <dialog id="system-admin-delete-dialog" class="project-delete-dialog">
+    <form id="system-admin-delete-form">
+      <div class="dialog-header">
+        <h2>アカウントを削除扱いにする</h2>
+        <button id="system-admin-delete-close" type="button" aria-label="閉じる">×</button>
+      </div>
+      <div class="project-delete-body">
+        <p class="danger-notice">写真・台帳・監査記録は保持したまま、この利用者を削除扱いにします。</p>
+        <p>削除扱いのアカウントは、通常画面から再開できません。</p>
+        <p>確認のため、次のメールアドレスを完全一致で入力してください。</p>
+        <p id="system-admin-delete-target" class="system-admin-email"></p>
+        <label class="project-delete-confirm">メールアドレス
+          <input id="system-admin-delete-confirm-email" type="email" autocomplete="off" autocapitalize="none" spellcheck="false">
+        </label>
+      </div>
+      <div class="project-delete-footer">
+        <button id="system-admin-delete-cancel" type="button" class="secondary">キャンセル</button>
+        <button id="system-admin-delete-submit" type="submit" class="local-delete-confirm-button" disabled>削除扱いにする</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="caption-editor" class="caption-editor">
     <form id="caption-editor-form" method="dialog">
       <div class="dialog-header"><h2>台帳文言を編集</h2><button id="caption-editor-close" type="button" aria-label="閉じる">×</button></div>
@@ -556,6 +603,6 @@
   </dialog>
 
   <script src="vendor/jszip.min.js"></script>
-  <script type="module" src="js/app.js?v=20260817-auth-guidance1"></script>
+  <script type="module" src="js/app.js?v=20260902-admin-confirm1"></script>
 </body>
 </html>

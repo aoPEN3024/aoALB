@@ -1,5 +1,5 @@
 import { loadCloudConfig, loadLocalCloudConfig } from "./cloud/config.js";
-import { createSupabaseProvider } from "./cloud/supabase-provider.js?v=20260901-invite-callback2";
+import { createSupabaseProvider } from "./cloud/supabase-provider.js?v=20260904-auth-callback3";
 import { clearSharedDeviceData, getCloudChanges } from "./storage.js";
 
 const DEVICE_KEY = "aoALB:accountDeviceUid";
@@ -35,7 +35,9 @@ export function classifyAuthFailure(error, callbackUrl = null, authAction = "") 
   if (name === "typeerror" || /failed to fetch|network|offline|load failed/.test(detail)) {
     return { code: "network", action, message: "通信できませんでした。接続を確認して、もう一度お試しください。" };
   }
-  if (code === "flow_state_not_found" || code === "bad_code_verifier" || /pkce|code verifier|flow state/.test(detail)) {
+  if (code === "flow_state_not_found" || code === "bad_code_verifier"
+    || name === "authpkcecodeverifiermissingerror"
+    || /pkce|code verifier|flow state|both auth code and code verifier should be non-empty/.test(detail)) {
     return {
       code: "pkce_missing", action,
       message: "このメールを送ったブラウザで、最新のメールにあるリンクを開いてください。\n別のブラウザやホーム画面のアプリで開くと、確認できない場合があります。もう一度メールを送信し、そのまま同じブラウザでリンクを開いてください。"

@@ -1,5 +1,5 @@
 import { loadCloudConfig, loadLocalCloudConfig } from "./cloud/config.js";
-import { createSupabaseProvider } from "./cloud/supabase-provider.js?v=20260901-invite-callback2";
+import { createSupabaseProvider } from "./cloud/supabase-provider.js?v=20260904-auth-callback3";
 
 const STATUS_LABELS = {
   invited: "招待中",

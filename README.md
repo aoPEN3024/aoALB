@@ -54,6 +54,7 @@ python -m http.server 8000
 - 写真同期の通信量制御仕様は[`docs/photo-sync-spec.md`](docs/photo-sync-spec.md)に定義しています。初期値はWi-Fi確認時のみで、回線不明時やモバイル通信では自動送信しません。写真は1枚ずつ送信し、原寸と小容量サムネイルの保存確認後に同期済みとします。
 - service role key、DBパスワード、工事PASSをリポジトリへ保存しません。
 - Supabaseのローカル検証手順は[`docs/supabase-setup.md`](docs/supabase-setup.md)を参照してください。接続設定はgit管理外の`config/cloud.local.json`へ保存し、Publishable keyだけを使用します。
+- 招待制アカウントとシステム管理画面の適用順・公開前条件は[`docs/invite-only-account-ui.md`](docs/invite-only-account-ui.md)を参照してください。この機能はDB基盤とEdge Functionの検証・適用が終わるまで公開しません。
 - 会社PASSの初回登録・変更・紛失時の手順は[`docs/site-creation-code.md`](docs/site-creation-code.md)を参照してください。平文PASSはDB、Git、チャット、アプリ設定へ保存しません。
 - 現段階のクラウド共有は青山塗装社内だけの試験運用です。Turnstileは正式な外部提供前に追加します。公開ページを開いただけでは匿名ユーザーを作らず、「現場共有を開始」を選んだ場合だけAnonymous Sign-Inを行います。RLSと非公開Storageを維持し、会社PASSまたは工事PASSがなければ現場データへ参加できません。
 - 社内試験の監視、緊急停止、会社PASS漏えい時の対応は[`docs/internal-cloud-trial.md`](docs/internal-cloud-trial.md)、所属のない古い匿名ユーザーの確認と整理は[`docs/anonymous-user-maintenance.md`](docs/anonymous-user-maintenance.md)を参照してください。匿名ユーザーは自動削除しません。

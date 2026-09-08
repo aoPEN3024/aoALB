@@ -23,6 +23,12 @@ const publicAuth = createClient(SUPABASE_URL, PUBLISHABLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
+function authRedirect(action: "signup" | "recovery"): string {
+  const url = new URL(AUTH_REDIRECT_URL);
+  url.searchParams.set("authAction", action);
+  return url.toString();
+}
+
 function corsHeaders(origin: string | null): HeadersInit {
   return {
     "Access-Control-Allow-Origin": origin && ALLOWED_ORIGINS.has(origin) ? origin : "",
@@ -298,7 +304,7 @@ Deno.serve(async (request: Request) => {
         return response(origin, 409, { ok: false, error: "invitation_recovery_needs_review" });
       }
       const { data, error } = await admin.auth.admin.inviteUserByEmail(email, {
-        redirectTo: AUTH_REDIRECT_URL,
+        redirectTo: authRedirect("signup"),
         data: { display_name: displayName, aoalb_invitation_operation_id: operationId },
       });
       if (error || !data.user?.id) throw new Error("invite_failed");
@@ -352,13 +358,13 @@ Deno.serve(async (request: Request) => {
       const { error } = await publicAuth.auth.resend({
         type: "signup",
         email: target.user.email,
-        options: { emailRedirectTo: AUTH_REDIRECT_URL },
+        options: { emailRedirectTo: authRedirect("signup") },
       });
       if (error) throw new Error("invite_resend_failed");
       await writeAudit(actor.id, targetId, "account.invite_resend", true, "");
     } else if (action === "send_password_reset") {
       if (!target.user.email) throw new Error("account_unavailable");
-      const { error } = await publicAuth.auth.resetPasswordForEmail(target.user.email, { redirectTo: AUTH_REDIRECT_URL });
+      const { error } = await publicAuth.auth.resetPasswordForEmail(target.user.email, { redirectTo: authRedirect("recovery") });
       if (error) throw new Error("password_reset_failed");
       await writeAudit(actor.id, targetId, "account.password_reset", true, "");
     } else if (action === "suspend") {

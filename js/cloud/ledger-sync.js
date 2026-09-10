@@ -1,8 +1,9 @@
 import {
   completeClassificationChange, completeCloudLedgerChange, getCloudChanges, getCloudConflicts, getLedgers,
   getPhotosByProjectUid, getProjects, recordCloudConflict, resolveClassificationConflict, resolveLedgerConflict, saveLedger,
+  deleteLocalLedger,
   saveLedgerWithCloudChange, mergeCloudClassificationOverrides, updateCloudChange
-} from "../storage.js";
+} from "../storage.js?v=20260910-ledger-library1";
 
 let provider = null;
 let identity = null;
@@ -56,6 +57,30 @@ export async function saveLedgerForProject(ledger, project, photos) {
   if (!online()) return local;
   await flushCloudChanges();
   return (await getLedgers()).find(row => row.internalId === local.internalId) || local;
+}
+
+export async function deleteLedgerForProject(ledger, project) {
+  if (!ledger?.internalId || !ledger?.ledgerId) throw new Error("削除する台帳を特定できません。");
+  if (!project?.siteId || !project?.cloud?.remoteProjectId || !ledger.cloud?.remoteLedgerId) {
+    return deleteLocalLedger(ledger.internalId, ledger.ledgerId);
+  }
+  if (!provider || !identity || identity.siteId !== project.siteId || !["admin", "editor"].includes(identity.role)) {
+    throw new Error("この共有工事の台帳を削除する権限がありません。");
+  }
+  if (!online()) throw new Error("共有台帳の削除には通信が必要です。オンラインで再試行してください。");
+  const entityKey = `ledger:${ledger.ledgerId}`;
+  const pending = (await getCloudChanges(project.siteId)).some(change => change.entityKey === entityKey);
+  if (pending || ledger.syncStatus === "pending" || ledger.syncStatus === "error") {
+    throw new Error("未送信の変更があります。送信が完了してから削除してください。");
+  }
+  if (!Number.isInteger(Number(ledger.cloud.revision)) || Number(ledger.cloud.revision) < 1) {
+    throw new Error("共有台帳の更新状態を確認できません。最新の状態を読み込んでください。");
+  }
+  await provider.deleteLedgerSnapshot({
+    siteId: project.siteId, remoteLedgerId: ledger.cloud.remoteLedgerId,
+    expectedRevision: Number(ledger.cloud.revision), eventId: crypto.randomUUID()
+  });
+  return deleteLocalLedger(ledger.internalId, ledger.ledgerId);
 }
 
 async function sendChange(change) {
@@ -114,8 +139,8 @@ export async function flushCloudChanges() {
 export async function syncCloudLedgers() {
   if (!provider || !identity?.siteId || !online()) return { skipped: true };
   const siteId = identity.siteId;
-  const [snapshots, overrides, projects, ledgers, changes, existingConflicts] = await Promise.all([
-    provider.listLedgerSnapshots(siteId), provider.listClassificationOverrides(siteId),
+  const [snapshots, deletions, overrides, projects, ledgers, changes, existingConflicts] = await Promise.all([
+    provider.listLedgerSnapshots(siteId), provider.listLedgerDeletions(siteId), provider.listClassificationOverrides(siteId),
     getProjects(), getLedgers(), getCloudChanges(siteId), getCloudConflicts(siteId)
   ]);
   const pending = new Set(changes.map(row => row.entityKey));
@@ -155,6 +180,25 @@ export async function syncCloudLedgers() {
       conflicts += 1;
     } else { await saveLedger(cloudLedger); merged += 1; }
   }
+  let deleted = 0;
+  for (const tombstone of deletions) {
+    const local = ledgers.find(row => row.ledgerId === tombstone.ledgerUid && row.cloud?.siteId === siteId);
+    if (!local) continue;
+    const entityKey = `ledger:${tombstone.ledgerUid}`;
+    const existingConflict = conflictByKey.get(entityKey);
+    if (pending.has(entityKey) || existingConflict) {
+      const change = changes.find(row => row.entityKey === entityKey);
+      await recordCloudConflict({ entityKey, entityType: "ledger", siteId,
+        localValue: existingConflict?.localValue || local,
+        cloudValue: { deleted: true, internalId: local.internalId, ledgerId: local.ledgerId },
+        cloudDeleted: true,
+        message: "この台帳は別の端末で削除されました。この端末の未送信変更を複製して残すか、削除を反映してください。" }, change?.changeId || "");
+      conflicts += 1;
+    } else {
+      await deleteLocalLedger(local.internalId, local.ledgerId);
+      deleted += 1;
+    }
+  }
   const allPhotos = [...photoMaps.values()].flat();
   for (const row of overrides.filter(item => pendingClassification.has(item.photo_id) || conflictClassification.has(item.photo_id))) {
     const change = changes.find(item => item.remotePhotoId === row.photo_id);
@@ -171,9 +215,9 @@ export async function syncCloudLedgers() {
   const blockedClassification = new Set([...pendingClassification, ...conflictClassification]);
   const overrideCount = await mergeCloudClassificationOverrides(overrides, blockedClassification);
   globalThis.dispatchEvent?.(new CustomEvent("aoalb:ledger-cloud-updated", {
-    detail: { merged, conflicts, overrideCount }
+    detail: { merged, deleted, conflicts, overrideCount }
   }));
-  return { merged, conflicts, overrideCount };
+  return { merged, deleted, conflicts, overrideCount };
 }
 
 export async function cloudLedgerSyncStatus() {

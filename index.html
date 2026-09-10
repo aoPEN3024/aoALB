@@ -10,7 +10,7 @@
   <link rel="icon" type="image/png" sizes="16x16" href="assets/brand/favicon-16-v1.png">
   <link rel="icon" type="image/png" sizes="32x32" href="assets/brand/favicon-32-v1.png">
   <link rel="apple-touch-icon" sizes="180x180" href="assets/brand/apple-touch-icon-v1.png">
-  <link rel="stylesheet" href="css/app.css?v=20260904-auth-callback3">
+  <link rel="stylesheet" href="css/app.css?v=20260910-ledger-library1">
   <link rel="stylesheet" href="css/print.css" media="print">
 </head>
 <body>
@@ -393,8 +393,16 @@
     <section id="view-ledgers" class="view ledger-view" hidden aria-labelledby="ledgers-title">
       <div class="page-heading compact ledger-heading">
         <div><p class="eyebrow">LEDGER</p><h1 id="ledgers-title">施工状況写真台帳</h1></div>
-        <p>写真情報を変更せず、台帳ごとの配置だけを保存します。</p>
+        <p>作成中・保存済みの台帳を選び、写真配置や台帳名を編集できます。</p>
       </div>
+      <section class="ledger-list-panel" aria-labelledby="ledger-list-title">
+        <div class="ledger-list-heading">
+          <div><h2 id="ledger-list-title">台帳一覧</h2><p>台帳を削除しても、写真一覧の写真は削除されません。</p></div>
+          <span id="ledger-list-count" class="ledger-list-count">0件</span>
+        </div>
+        <div id="ledger-list" class="ledger-list"></div>
+        <p id="ledger-list-empty" class="empty-state compact">工事を選択すると、作成中・保存済みの台帳が表示されます。</p>
+      </section>
       <div class="ledger-setup" aria-label="台帳設定">
         <label>工事<select id="ledger-project"></select></label>
         <label>台帳<select id="ledger-select"></select></label>
@@ -441,6 +449,21 @@
       </div>
     </section>
   </main>
+
+  <dialog id="ledger-delete-dialog" class="ledger-delete-dialog">
+    <form id="ledger-delete-form">
+      <div class="dialog-header"><h2>台帳だけを削除</h2><button id="ledger-delete-close" type="button" aria-label="閉じる">×</button></div>
+      <div class="ledger-delete-body">
+        <p id="ledger-delete-summary"></p>
+        <p class="danger-notice">台帳の写真配置、表紙、台帳文を削除します。写真一覧の写真や原寸画像は削除されません。</p>
+        <p id="ledger-delete-error" class="project-delete-error" role="alert" hidden></p>
+      </div>
+      <div class="project-delete-footer">
+        <button id="ledger-delete-cancel" type="button" class="secondary">キャンセル</button>
+        <button id="ledger-delete-submit" type="submit" class="local-delete-confirm-button">台帳だけ削除</button>
+      </div>
+    </form>
+  </dialog>
 
   <dialog id="photo-detail">
     <div class="dialog-header"><h2>写真詳細</h2><button id="close-detail" type="button" aria-label="閉じる">×</button></div>
@@ -603,6 +626,6 @@
   </dialog>
 
   <script src="vendor/jszip.min.js"></script>
-  <script type="module" src="js/app.js?v=20260904-auth-callback3"></script>
+  <script type="module" src="js/app.js?v=20260910-ledger-library1"></script>
 </body>
 </html>

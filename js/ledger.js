@@ -1,8 +1,8 @@
 import {
   getProjects, getPhotosByProjectUid,
   getLedgersByProjectId, getLedger
-} from "./storage.js";
-import { saveLedgerForProject } from "./cloud/ledger-sync.js?v=20260805-ledger1";
+} from "./storage.js?v=20260910-ledger-library1";
+import { deleteLedgerForProject, saveLedgerForProject } from "./cloud/ledger-sync.js?v=20260910-ledger-library1";
 import { loadPhotoAsset } from "./cloud/receiver.js";
 import { effectiveClassification } from "./classification.js";
 import {
@@ -89,6 +89,15 @@ export function createLedger(projectId, title = "施工状況写真") {
 
 export function placedPhotoIds(ledger) {
   return flattenSlots(ledger).filter(slot => slot.type === "photo").map(slot => slot.photoId);
+}
+
+export function ledgerListDetails(ledger, selectedLedgerId = "") {
+  const placed = placedPhotoIds(ledger).length;
+  const pages = Array.isArray(ledger?.pages) ? ledger.pages.length : 0;
+  const state = ledger?.internalId === selectedLedgerId ? "編集中"
+    : ledger?.syncStatus === "pending" ? "保存待ち"
+      : ledger?.syncStatus === "error" ? "送信エラー" : "保存済み";
+  return { placed, pages, state };
 }
 
 export function assertUniquePhotos(ledger) {
@@ -208,6 +217,7 @@ export function initLedgerEditor() {
   const byId = id => document.getElementById(id);
   const ui = {
     project: byId("ledger-project"), select: byId("ledger-select"), create: byId("ledger-new"),
+    list: byId("ledger-list"), listCount: byId("ledger-list-count"), listEmpty: byId("ledger-list-empty"),
     title: byId("ledger-title"), showCover: byId("ledger-show-cover"), auto: byId("ledger-auto"),
     addPage: byId("ledger-add-page"), print: byId("ledger-print"), status: byId("ledger-save-status"),
     viewModes: [...document.querySelectorAll('input[name="ledger-view-mode"]')], viewNote: byId("ledger-view-note"),
@@ -220,6 +230,10 @@ export function initLedgerEditor() {
     captionClose: byId("caption-editor-close"), captionCancel: byId("caption-editor-cancel"),
     captionReset: byId("caption-editor-reset"), captionSave: byId("caption-editor-save"),
     captionInputs: { koushu: byId("caption-koushu"), sokuten: byId("caption-sokuten"), text: byId("caption-text") },
+    deleteDialog: byId("ledger-delete-dialog"), deleteForm: byId("ledger-delete-form"),
+    deleteSummary: byId("ledger-delete-summary"), deleteError: byId("ledger-delete-error"),
+    deleteClose: byId("ledger-delete-close"), deleteCancel: byId("ledger-delete-cancel"),
+    deleteSubmit: byId("ledger-delete-submit"),
     filters: {
       koushu: byId("ledger-filter-koushu"), shubetsu: byId("ledger-filter-shubetsu"),
       saibetsu: byId("ledger-filter-saibetsu"), sokuten: byId("ledger-filter-sokuten"),
@@ -241,6 +255,8 @@ export function initLedgerEditor() {
   let validation = { valid: false, empty: true, issues: [] };
   let viewMode = localStorage.getItem(LEDGER_VIEW_KEY) === "spread" ? "spread" : "single";
   let captionEditor = null;
+  let deleteTarget = null;
+  let deleting = false;
   let previewResizeObserver = null;
   let previewScaleFrame = 0;
   let previewValidationTimer = 0;
@@ -364,6 +380,73 @@ export function initLedgerEditor() {
   function renderLedgerOptions() {
     ui.select.replaceChildren(option(ledgers.length ? "台帳を選択してください" : "台帳はまだありません"), ...ledgers.map(ledger => option(ledger.title, ledger.internalId)));
     if (currentLedger && ledgers.some(ledger => ledger.internalId === currentLedger.internalId)) ui.select.value = currentLedger.internalId;
+  }
+
+  function formatUpdatedAt(value) {
+    const date = new Date(value || "");
+    return Number.isNaN(date.getTime()) ? "更新日時不明" : `更新 ${date.toLocaleString("ja-JP", { dateStyle: "short", timeStyle: "short" })}`;
+  }
+
+  async function selectLedger(internalId) {
+    if (internalId) localStorage.setItem(LEDGER_SELECT_KEY, internalId);
+    else localStorage.removeItem(LEDGER_SELECT_KEY);
+    currentLedger = internalId ? normalizeLedger(await getLedger(internalId)) : null;
+    if (currentLedger?.viewMode) viewMode = currentLedger.viewMode;
+    selectedPhotoId = "";
+    selectedSlotIndex = -1;
+    await renderAll();
+  }
+
+  function closeDeleteDialog() {
+    if (deleting) return;
+    deleteTarget = null;
+    ui.deleteError.hidden = true;
+    if (ui.deleteDialog.open) ui.deleteDialog.close();
+  }
+
+  function ledgerDeleteMessage(error) {
+    const code = String(error?.code || "");
+    const message = String(error?.message || "");
+    if (code === "40001" || /revision_conflict/i.test(message)) return "別の端末で台帳が更新されています。最新の状態を読み込んでから再試行してください。";
+    if (code === "42501" || /権限|operation_not_allowed/i.test(message)) return "この台帳を削除する権限がありません。";
+    if (/通信|オンライン|未送信|更新状態/.test(message)) return message;
+    if (code === "P0002" || /ledger_deleted|ledger_not_found/i.test(message)) return "台帳が別の端末で削除された可能性があります。最新の一覧を確認してください。";
+    return "台帳を削除できませんでした。通信状態を確認し、最新の一覧から再試行してください。";
+  }
+
+  function openDeleteDialog(ledger) {
+    const details = ledgerListDetails(ledger, currentLedger?.internalId || "");
+    deleteTarget = clone(ledger);
+    ui.deleteSummary.textContent = `「${ledger.title}」（${details.pages}ページ・写真${details.placed}枚配置）を削除します。`;
+    ui.deleteError.hidden = true;
+    ui.deleteSubmit.disabled = false;
+    ui.deleteDialog.showModal();
+    ui.deleteCancel.focus();
+  }
+
+  function renderLedgerList() {
+    ui.listCount.textContent = `${ledgers.length}件`;
+    ui.listEmpty.hidden = ledgers.length > 0;
+    ui.list.replaceChildren(...ledgers.map(ledger => {
+      const current = ledger.internalId === currentLedger?.internalId;
+      const details = ledgerListDetails(ledger, currentLedger?.internalId || "");
+      const card = element("article", `ledger-list-card${current ? " current" : ""}`);
+      const heading = element("div", "ledger-list-card-title");
+      heading.append(element("h3", "", ledger.title), element("span", "ledger-list-state", details.state));
+      const meta = element("p", "ledger-list-meta", `${details.pages}ページ・写真${details.placed}枚配置・${formatUpdatedAt(ledger.updatedAt)}`);
+      const actions = element("div", "ledger-list-actions");
+      const edit = element("button", current ? "secondary" : "primary", current ? "編集中" : "編集する");
+      edit.type = "button";
+      edit.disabled = current;
+      edit.addEventListener("click", () => selectLedger(ledger.internalId));
+      const remove = element("button", "danger-outline", "台帳だけ削除");
+      remove.type = "button";
+      remove.disabled = deleting;
+      remove.addEventListener("click", () => openDeleteDialog(ledger));
+      actions.append(edit, remove);
+      card.append(heading, meta, actions);
+      return card;
+    }));
   }
 
   function setupFilters() {
@@ -596,6 +679,7 @@ export function initLedgerEditor() {
     ui.auto.disabled = !currentLedger;
     ui.addPage.disabled = !currentLedger;
     renderLedgerOptions();
+    renderLedgerList();
     renderLibrary();
     await renderPreview();
   }
@@ -640,7 +724,8 @@ export function initLedgerEditor() {
     clearLibraryUrls();
     currentProject = projects.find(project => project.projectUid === projectUid) || null;
     photos = currentProject ? await getPhotosByProjectUid(currentProject.projectUid) : [];
-    ledgers = currentProject ? (await getLedgersByProjectId(currentProject.internalId)).map(normalizeLedger) : [];
+    ledgers = currentProject ? (await getLedgersByProjectId(currentProject.internalId)).map(normalizeLedger)
+      .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""))) : [];
     currentLedger = preferredLedgerId ? ledgers.find(item => item.internalId === preferredLedgerId) || null : ledgers[0] || null;
     if (currentLedger?.viewMode) viewMode = currentLedger.viewMode;
     selectedPhotoId = "";
@@ -672,13 +757,7 @@ export function initLedgerEditor() {
     loadProject(projectUid);
   });
   ui.select.addEventListener("change", async () => {
-    if (ui.select.value) localStorage.setItem(LEDGER_SELECT_KEY, ui.select.value);
-    else localStorage.removeItem(LEDGER_SELECT_KEY);
-    currentLedger = ui.select.value ? normalizeLedger(await getLedger(ui.select.value)) : null;
-    if (currentLedger?.viewMode) viewMode = currentLedger.viewMode;
-    selectedPhotoId = "";
-    selectedSlotIndex = -1;
-    await renderAll();
+    await selectLedger(ui.select.value);
   });
   ui.create.addEventListener("click", async () => {
     if (!currentProject) return status("先に工事を選択してください。", true);
@@ -687,6 +766,7 @@ export function initLedgerEditor() {
       const saved = await saveLedgerForProject(ledger, currentProject, photos);
       ledgers.push(saved);
       currentLedger = saved;
+      localStorage.setItem(LEDGER_SELECT_KEY, saved.internalId);
       await renderAll();
       status("新しい台帳を作成しました。");
     } catch (error) {
@@ -777,6 +857,37 @@ export function initLedgerEditor() {
     mutate(ledger => setCaptionOverride(ledger, photoId, override), { preserveSelection: true });
   });
   ui.captionDialog.addEventListener("cancel", event => { event.preventDefault(); closeCaptionEditor(); });
+  ui.deleteClose.addEventListener("click", closeDeleteDialog);
+  ui.deleteCancel.addEventListener("click", closeDeleteDialog);
+  ui.deleteDialog.addEventListener("cancel", event => { event.preventDefault(); closeDeleteDialog(); });
+  ui.deleteForm.addEventListener("submit", async event => {
+    event.preventDefault();
+    if (!deleteTarget || deleting) return;
+    deleting = true;
+    ui.deleteSubmit.disabled = true;
+    ui.deleteError.hidden = true;
+    const target = clone(deleteTarget);
+    try {
+      await mutationQueue;
+      await deleteLedgerForProject(target, currentProject);
+      ledgers = ledgers.filter(ledger => ledger.internalId !== target.internalId);
+      if (currentLedger?.internalId === target.internalId) {
+        currentLedger = ledgers[0] || null;
+        if (currentLedger) localStorage.setItem(LEDGER_SELECT_KEY, currentLedger.internalId);
+        else localStorage.removeItem(LEDGER_SELECT_KEY);
+      }
+      deleting = false;
+      deleteTarget = null;
+      ui.deleteDialog.close();
+      await renderAll();
+      status("台帳だけを削除しました。写真一覧の写真は残っています。");
+    } catch (error) {
+      deleting = false;
+      ui.deleteSubmit.disabled = false;
+      ui.deleteError.textContent = ledgerDeleteMessage(error);
+      ui.deleteError.hidden = false;
+    }
+  });
   applyViewMode();
   window.addEventListener("aoalb:ledger-sync-status", event => {
     if (!active) return;
@@ -785,6 +896,10 @@ export function initLedgerEditor() {
     else if (detail.errors) status(`クラウドへ送れない変更が${detail.errors}件あります。端末内には保存されています。`, true);
     else if (detail.pending) status("この端末へ保存しました。クラウドへ送信しています…");
     else if (detail.synced) status("クラウドへ保存しました。");
+  });
+  window.addEventListener("aoalb:ledger-cloud-updated", event => {
+    if (!active || !event.detail?.deleted || !currentProject) return;
+    loadProject(currentProject.projectUid, currentLedger?.internalId || "").catch(error => status(error.message || "台帳一覧を更新できませんでした。", true));
   });
   window.addEventListener("beforeunload", () => { stopPreviewObserver(); releaseUrls(previewUrls); clearLibraryUrls(); });
 

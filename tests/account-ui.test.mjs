@@ -48,12 +48,12 @@ assert.equal(
 for (const source of [account, sharing, app, html]) {
   assert.doesNotMatch(source, /v=20260731-photo-delete2/);
 }
-assert.match(account, /supabase-provider\.js\?v=20260904-auth-callback3/);
-assert.match(sharing, /supabase-provider\.js\?v=20260904-auth-callback3/);
-assert.match(app, /sharing\.js\?v=20260904-auth-callback3/);
-assert.match(app, /account\.js\?v=20260904-auth-callback3/);
-assert.match(app, /system-admin\.js\?v=20260904-auth-callback3/);
-assert.match(html, /app\.js\?v=20260904-auth-callback3/);
+assert.match(account, /supabase-provider\.js\?v=20260910-ledger-library1/);
+assert.match(sharing, /supabase-provider\.js\?v=20260910-ledger-library1/);
+assert.match(app, /sharing\.js\?v=20260910-ledger-library1/);
+assert.match(app, /account\.js\?v=20260910-ledger-library1/);
+assert.match(app, /system-admin\.js\?v=20260910-ledger-library1/);
+assert.match(html, /app\.js\?v=20260910-ledger-library1/);
 assert.match(account, /AUTH_FRAGMENT_PARAMS[\s\S]*access_token[\s\S]*refresh_token/);
 assert.match(account, /isAuthFragment \? "#sharing"/);
 assert.match(html, /id="sharing-admin-claim-message"/);

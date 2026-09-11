@@ -138,6 +138,41 @@ export async function saveLedger(ledger) {
   }
 }
 
+export async function deleteLocalLedger(internalId, expectedLedgerId = "") {
+  if (!internalId) throw new Error("削除する台帳を特定できません。");
+  const db = await openDatabase();
+  const tx = db.transaction(["ledgers", "cloudChanges", "cloudConflicts"], "readwrite");
+  const done = transactionDone(tx);
+  try {
+    const ledgerStore = tx.objectStore("ledgers");
+    const changeStore = tx.objectStore("cloudChanges");
+    const conflictStore = tx.objectStore("cloudConflicts");
+    const ledger = await requestResult(ledgerStore.get(internalId));
+    if (!ledger || (expectedLedgerId && ledger.ledgerId !== expectedLedgerId)) {
+      throw new Error("削除する台帳が見つかりません。最新の一覧を確認してください。");
+    }
+    const entityKey = `ledger:${ledger.ledgerId}`;
+    const [changes, conflicts] = await Promise.all([
+      requestResult(changeStore.getAll()), requestResult(conflictStore.getAll())
+    ]);
+    for (const change of changes) {
+      if (change.entityKey === entityKey || change.localLedgerId === internalId) changeStore.delete(change.changeId);
+    }
+    for (const conflict of conflicts) {
+      if (conflict.entityKey === entityKey || conflict.localValue?.internalId === internalId || conflict.cloudValue?.internalId === internalId) {
+        conflictStore.delete(conflict.conflictId);
+      }
+    }
+    ledgerStore.delete(internalId);
+    await done;
+    return { internalId, ledgerId: ledger.ledgerId, projectId: ledger.projectId };
+  } catch (error) {
+    try { tx.abort(); } catch (_) { /* already completed or aborted */ }
+    await done.catch(() => {});
+    throw error;
+  }
+}
+
 export async function clearSharedDeviceData() {
   const db = await openDatabase();
   const stores = ["projects", "photos", "cloudFiles", "ledgers", "settings", "cloudChanges", "cloudConflicts"];
@@ -337,8 +372,12 @@ export async function resolveLedgerConflict(conflictId, strategy) {
     throw new Error("競合情報が見つかりません。再読み込みしてください。");
   }
   if (strategy === "cloud") {
-    if (!conflict.cloudValue?.internalId) throw new Error("クラウド版をまだ取得できません。オンラインで最新にしてください。");
-    tx.objectStore("ledgers").put(structuredClone(conflict.cloudValue));
+    if (conflict.cloudDeleted && conflict.localValue?.internalId) {
+      tx.objectStore("ledgers").delete(conflict.localValue.internalId);
+    } else {
+      if (!conflict.cloudValue?.internalId) throw new Error("クラウド版をまだ取得できません。オンラインで最新にしてください。");
+      tx.objectStore("ledgers").put(structuredClone(conflict.cloudValue));
+    }
   } else if (strategy === "copy") {
     const source = conflict.localValue;
     if (!source?.pages) throw new Error("端末側の台帳を複製できません。競合情報を残しました。");

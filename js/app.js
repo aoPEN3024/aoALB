@@ -5,14 +5,14 @@ import {
   getLocalProjectDeletionPreview, deleteLocalProjectData, getTrashedPhotosBySite,
   getPhotoDeletionPreview, deleteLocalPhotos, updatePhotoClassificationOverrides
 } from "./storage.js";
-import { initLedgerEditor } from "./ledger.js?v=20260910-ledger-library1";
-import { initSiteSharing } from "./sharing.js?v=20260910-ledger-library1";
+import { initLedgerEditor } from "./ledger.js?v=20260911-ledger-library2";
+import { initSiteSharing } from "./sharing.js?v=20260911-ledger-library2";
 import { loadPhotoAsset, syncCloudTrash } from "./cloud/receiver.js";
 import { photoDeleteConfirmation, photoSourceKind } from "./photo-delete.js";
 import { CLASSIFICATION_FIELDS, effectiveClassification, hasClassificationOverride } from "./classification.js";
-import { initAccountUI } from "./account.js?v=20260910-ledger-library1";
-import { initSystemAdminUI } from "./system-admin.js?v=20260910-ledger-library1";
-import { initCloudLedgerSyncUI } from "./cloud/ledger-sync.js?v=20260910-ledger-library1";
+import { initAccountUI } from "./account.js?v=20260911-ledger-library2";
+import { initSystemAdminUI } from "./system-admin.js?v=20260911-ledger-library2";
+import { initCloudLedgerSyncUI } from "./cloud/ledger-sync.js?v=20260911-ledger-library2";
 
 const views = ["import", "projects", "photos", "ledgers", "history", "sharing"];
 const elements = Object.fromEntries(Array.from(document.querySelectorAll("[id]"), element => [element.id, element]));

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { ledgerListDetails } from "../js/ledger.js";
 
 const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+const ledgerJs = readFileSync(new URL("../js/ledger.js", import.meta.url), "utf8");
 const storage = readFileSync(new URL("../js/storage.js", import.meta.url), "utf8");
 const sync = readFileSync(new URL("../js/cloud/ledger-sync.js", import.meta.url), "utf8");
 const provider = readFileSync(new URL("../js/cloud/supabase-provider.js", import.meta.url), "utf8");
@@ -15,9 +16,13 @@ assert.deepEqual(ledgerListDetails({ internalId: "a", pages: [{ slots: [{ type: 
 assert.equal(ledgerListDetails({ internalId: "b", syncStatus: "pending", pages: [] }).state, "保存待ち");
 assert.equal(ledgerListDetails({ internalId: "b", syncStatus: "error", pages: [] }).state, "送信エラー");
 
-for (const id of ["ledger-list", "ledger-list-count", "ledger-delete-dialog", "ledger-delete-submit"]) {
+for (const id of ["ledger-list", "ledger-list-body", "ledger-list-toggle", "ledger-list-count", "ledger-title-save", "ledger-delete-dialog", "ledger-delete-submit"]) {
   assert.match(html, new RegExp(`id="${id}"`));
 }
+
+assert.match(html, /aria-controls="ledger-list-body"/);
+assert.match(ledgerJs, /function setLedgerListOpen\(open\)/);
+assert.match(ledgerJs, /ui\.titleSave\.addEventListener\("click", saveLedgerTitle\)/);
 assert.match(html, /写真一覧の写真や原寸画像は削除されません/);
 assert.match(storage, /db\.transaction\(\["ledgers", "cloudChanges", "cloudConflicts"\], "readwrite"\)/);
 assert.match(storage, /ledgerStore\.delete\(internalId\)/);
@@ -39,5 +44,5 @@ assert.match(migration, /revoke all on function public\.delete_ledger_snapshot[^
 assert.match(migration, /grant execute on function public\.delete_ledger_snapshot[^]+to authenticated/);
 assert.match(rollback, /Rollback refused: deleted ledger tombstones exist/);
 
-assert.match(html, /20260910-ledger-library1/);
+assert.match(html, /20260911-ledger-library2/);
 console.log("ledger list and ledger-only deletion checks passed");

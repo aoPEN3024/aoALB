@@ -1,5 +1,5 @@
 import { loadCloudConfig, loadLocalCloudConfig } from "./cloud/config.js";
-import { createSupabaseProvider } from "./cloud/supabase-provider.js?v=20260910-ledger-library1";
+import { createSupabaseProvider } from "./cloud/supabase-provider.js?v=20260911-ledger-library2";
 
 const STATUS_LABELS = {
   invited: "招待中",

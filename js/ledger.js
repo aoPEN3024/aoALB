@@ -1,8 +1,8 @@
 import {
   getProjects, getPhotosByProjectUid,
   getLedgersByProjectId, getLedger
-} from "./storage.js?v=20260910-ledger-library1";
-import { deleteLedgerForProject, saveLedgerForProject } from "./cloud/ledger-sync.js?v=20260910-ledger-library1";
+} from "./storage.js?v=20260911-ledger-library2";
+import { deleteLedgerForProject, saveLedgerForProject } from "./cloud/ledger-sync.js?v=20260911-ledger-library2";
 import { loadPhotoAsset } from "./cloud/receiver.js";
 import { effectiveClassification } from "./classification.js";
 import {
@@ -217,8 +217,9 @@ export function initLedgerEditor() {
   const byId = id => document.getElementById(id);
   const ui = {
     project: byId("ledger-project"), select: byId("ledger-select"), create: byId("ledger-new"),
-    list: byId("ledger-list"), listCount: byId("ledger-list-count"), listEmpty: byId("ledger-list-empty"),
-    title: byId("ledger-title"), showCover: byId("ledger-show-cover"), auto: byId("ledger-auto"),
+    list: byId("ledger-list"), listBody: byId("ledger-list-body"), listCount: byId("ledger-list-count"),
+    listEmpty: byId("ledger-list-empty"), listToggle: byId("ledger-list-toggle"),
+    title: byId("ledger-title"), titleSave: byId("ledger-title-save"), showCover: byId("ledger-show-cover"), auto: byId("ledger-auto"),
     addPage: byId("ledger-add-page"), print: byId("ledger-print"), status: byId("ledger-save-status"),
     viewModes: [...document.querySelectorAll('input[name="ledger-view-mode"]')], viewNote: byId("ledger-view-note"),
     workspace: byId("ledger-workspace"), photoList: byId("ledger-photo-list"), unplacedCount: byId("ledger-unplaced-count"),
@@ -449,6 +450,12 @@ export function initLedgerEditor() {
     }));
   }
 
+  function setLedgerListOpen(open) {
+    ui.listBody.hidden = !open;
+    ui.listToggle.setAttribute("aria-expanded", String(open));
+    ui.listToggle.textContent = open ? "一覧を閉じる" : "一覧を開く";
+  }
+
   function setupFilters() {
     for (const key of ["koushu", "shubetsu", "saibetsu", "sokuten"]) {
       setOptions(ui.filters[key], photos.map(photo => effectiveClassification(photo)[key]));
@@ -675,6 +682,7 @@ export function initLedgerEditor() {
     ui.title.value = currentLedger?.title || "施工状況写真";
     ui.showCover.checked = currentLedger?.showCover !== false;
     ui.title.disabled = !currentLedger;
+    ui.titleSave.disabled = !currentLedger;
     ui.showCover.disabled = !currentLedger;
     ui.auto.disabled = !currentLedger;
     ui.addPage.disabled = !currentLedger;
@@ -773,7 +781,15 @@ export function initLedgerEditor() {
       status(`台帳を作成できませんでした。${error.message || ""}`, true);
     }
   });
-  ui.title.addEventListener("change", () => mutate(ledger => { ledger.title = ui.title.value.trim() || "施工状況写真"; return ledger; }));
+  const saveLedgerTitle = () => mutate(ledger => { ledger.title = ui.title.value.trim() || "施工状況写真"; return ledger; });
+  ui.titleSave.addEventListener("click", saveLedgerTitle);
+  ui.title.addEventListener("keydown", event => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    saveLedgerTitle();
+  });
+  ui.listToggle.addEventListener("click", () => setLedgerListOpen(ui.listBody.hidden));
+  setLedgerListOpen(false);
   ui.showCover.addEventListener("change", () => mutate(ledger => { ledger.showCover = ui.showCover.checked; return ledger; }));
   ui.auto.addEventListener("click", () => mutate(ledger => autoArrangeLedger(ledger, photos)));
   ui.addPage.addEventListener("click", () => mutate(addBlankPage));

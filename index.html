@@ -10,7 +10,7 @@
   <link rel="icon" type="image/png" sizes="16x16" href="assets/brand/favicon-16-v1.png">
   <link rel="icon" type="image/png" sizes="32x32" href="assets/brand/favicon-32-v1.png">
   <link rel="apple-touch-icon" sizes="180x180" href="assets/brand/apple-touch-icon-v1.png">
-  <link rel="stylesheet" href="css/app.css?v=20260910-ledger-library1">
+  <link rel="stylesheet" href="css/app.css?v=20260911-ledger-library2">
   <link rel="stylesheet" href="css/print.css" media="print">
 </head>
 <body>
@@ -398,16 +398,22 @@
       <section class="ledger-list-panel" aria-labelledby="ledger-list-title">
         <div class="ledger-list-heading">
           <div><h2 id="ledger-list-title">台帳一覧</h2><p>台帳を削除しても、写真一覧の写真は削除されません。</p></div>
-          <span id="ledger-list-count" class="ledger-list-count">0件</span>
+          <div class="ledger-list-heading-actions">
+            <span id="ledger-list-count" class="ledger-list-count">0件</span>
+            <button id="ledger-list-toggle" type="button" class="secondary compact-button" aria-expanded="false" aria-controls="ledger-list-body">一覧を開く</button>
+          </div>
         </div>
-        <div id="ledger-list" class="ledger-list"></div>
-        <p id="ledger-list-empty" class="empty-state compact">工事を選択すると、作成中・保存済みの台帳が表示されます。</p>
+        <div id="ledger-list-body" class="ledger-list-body" hidden>
+          <div id="ledger-list" class="ledger-list"></div>
+          <p id="ledger-list-empty" class="empty-state compact">工事を選択すると、作成中・保存済みの台帳が表示されます。</p>
+        </div>
       </section>
       <div class="ledger-setup" aria-label="台帳設定">
         <label>工事<select id="ledger-project"></select></label>
         <label>台帳<select id="ledger-select"></select></label>
         <button id="ledger-new" type="button" class="secondary">新しい台帳</button>
-        <label class="ledger-title-label">台帳名<input id="ledger-title" type="text" maxlength="120" value="施工状況写真"></label>
+        <label class="ledger-title-label">台帳名<input id="ledger-title" type="text" maxlength="120" value="施工状況写真" enterkeyhint="done"></label>
+        <button id="ledger-title-save" type="button" class="secondary">台帳名を保存</button>
         <label class="check-label ledger-cover-toggle"><input id="ledger-show-cover" type="checkbox" checked>表紙あり</label>
       </div>
       <div class="ledger-toolbar">
@@ -626,6 +632,6 @@
   </dialog>
 
   <script src="vendor/jszip.min.js"></script>
-  <script type="module" src="js/app.js?v=20260910-ledger-library1"></script>
+  <script type="module" src="js/app.js?v=20260911-ledger-library2"></script>
 </body>
 </html>

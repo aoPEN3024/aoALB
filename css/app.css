@@ -254,7 +254,28 @@ dialog::backdrop { background: rgba(12,24,42,.62); }
 /* 台帳編集 */
 .ledger-heading { display: flex; align-items: end; justify-content: space-between; gap: 20px; }
 .ledger-heading h1 { margin-bottom: 0; }
-.ledger-setup { display: grid; grid-template-columns: minmax(180px, 1.2fr) minmax(180px, 1fr) auto minmax(220px, 1fr) auto; gap: 12px; align-items: end; padding: 16px; background: #fff; border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); }
+.ledger-list-panel { margin-bottom: 14px; padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: #fff; box-shadow: var(--shadow); }
+.ledger-list-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+.ledger-list-heading h2 { margin: 0; font-size: 1.08rem; }
+.ledger-list-heading p { margin: 4px 0 0; color: var(--muted); font-size: .82rem; }
+.ledger-list-heading-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+.ledger-list-count { flex: none; padding: 4px 9px; border-radius: 999px; background: var(--blue-soft); color: var(--blue); font-size: .8rem; font-weight: 800; }
+.compact-button { min-height: 36px; padding: 6px 11px; }
+.ledger-list-body { max-height: min(48vh, 520px); overflow: auto; padding: 2px; }
+.ledger-list-body[hidden] { display: none; }
+.ledger-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
+.ledger-list-card { display: grid; gap: 10px; padding: 13px; border: 1px solid var(--line); border-radius: 12px; background: #f8fafc; }
+.ledger-list-card.current { border-color: var(--blue); box-shadow: 0 0 0 2px rgba(19,83,153,.12); }
+.ledger-list-card-title { display: flex; align-items: start; justify-content: space-between; gap: 10px; }
+.ledger-list-card h3 { margin: 0; overflow-wrap: anywhere; font-size: .98rem; }
+.ledger-list-state { flex: none; color: var(--muted); font-size: .76rem; font-weight: 800; }
+.ledger-list-card.current .ledger-list-state { color: var(--blue); }
+.ledger-list-meta { margin: 0; color: var(--muted); font-size: .78rem; }
+.ledger-list-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.ledger-list-actions button { flex: 1 1 110px; }
+.ledger-delete-dialog { width: min(520px, calc(100% - 24px)); }
+.ledger-delete-body { padding: 16px 20px; }
+.ledger-setup { display: grid; grid-template-columns: minmax(180px, 1.2fr) minmax(180px, 1fr) auto minmax(220px, 1fr) auto auto; gap: 12px; align-items: end; padding: 16px; background: #fff; border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); }
 .ledger-setup label, .ledger-photo-filters label { display: grid; gap: 5px; color: var(--muted); font-size: .8rem; font-weight: 700; }
 .ledger-setup select, .ledger-setup input[type=text], .ledger-photo-filters select, .ledger-photo-filters input { width: 100%; min-width: 0; padding: 9px 10px; border: 1px solid var(--line); border-radius: 9px; background: #fff; color: var(--ink); }
 .ledger-cover-toggle { padding: 0 6px 10px; }
@@ -404,6 +425,8 @@ dialog::backdrop { background: rgba(12,24,42,.62); }
   .project-delete-footer { flex-wrap: wrap; }
   .project-delete-footer button { flex: 1 1 100%; }
   .ledger-heading { display: block; }
+  .ledger-list-heading { align-items: start; }
+  .ledger-list { grid-template-columns: 1fr; }
   .ledger-setup { grid-template-columns: 1fr; }
   .ledger-title-label { grid-column: auto; }
   .ledger-cover-toggle { padding: 4px 0; }

@@ -501,6 +501,11 @@ async function buildSupabaseProvider(config) {
       if (error) throw error;
       return Array.isArray(data) ? data : [];
     },
+    async listLedgerDeletions(siteId) {
+      const { data, error } = await client.rpc("list_site_ledger_deletions", { p_site_id: siteId });
+      if (error) throw error;
+      return Array.isArray(data) ? data : [];
+    },
     async saveLedgerSnapshot(payload) {
       const { data, error } = await client.rpc("save_ledger_snapshot", {
         p_site_id: payload.siteId, p_project_id: payload.remoteProjectId,
@@ -509,6 +514,14 @@ async function buildSupabaseProvider(config) {
         p_template: payload.template, p_show_cover: payload.showCover,
         p_view_mode: payload.viewMode, p_pages: payload.pages, p_captions: payload.captions,
         p_event_id: payload.eventId
+      });
+      if (error) throw error;
+      return Array.isArray(data) ? data[0] : data;
+    },
+    async deleteLedgerSnapshot(payload) {
+      const { data, error } = await client.rpc("delete_ledger_snapshot", {
+        p_site_id: payload.siteId, p_ledger_id: payload.remoteLedgerId,
+        p_expected_revision: Number(payload.expectedRevision), p_event_id: payload.eventId
       });
       if (error) throw error;
       return Array.isArray(data) ? data[0] : data;

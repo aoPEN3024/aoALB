@@ -44,5 +44,5 @@ assert.match(migration, /revoke all on function public\.delete_ledger_snapshot[^
 assert.match(migration, /grant execute on function public\.delete_ledger_snapshot[^]+to authenticated/);
 assert.match(rollback, /Rollback refused: deleted ledger tombstones exist/);
 
-assert.match(html, /20261118-ledger-speed1/);
+assert.match(html, /20261119-ledger-speed2/);
 console.log("ledger list and ledger-only deletion checks passed");

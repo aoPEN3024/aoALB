@@ -1,14 +1,14 @@
 import {
   getProjects, getPhotosByProjectUid,
   getLedgersByProjectId, getLedger
-} from "./storage.js?v=20261118-ledger-speed1";
-import { deleteLedgerForProject, saveLedgerForProject } from "./cloud/ledger-sync.js?v=20261118-ledger-speed1";
+} from "./storage.js?v=20261119-ledger-speed2";
+import { deleteLedgerForProject, saveLedgerForProject } from "./cloud/ledger-sync.js?v=20261119-ledger-speed2";
 import { loadPhotoAsset } from "./cloud/receiver.js";
 import { effectiveClassification } from "./classification.js";
 import {
   PRINT_TEMPLATE, automaticCaptionFields, renderLedgerPages,
   validateLedgerPages, printLedger
-} from "./print.js?v=20261118-ledger-speed1";
+} from "./print.js?v=20261119-ledger-speed2";
 
 export const LEDGER_SCHEMA_VERSION = 2;
 export const blankSlot = () => ({ type: "blank" });
@@ -658,7 +658,10 @@ export function initLedgerEditor() {
       slot.addEventListener("click", event => {
         if (event.target.closest("button")) return;
         if (selectedPhotoId) {
-          mutate(ledger => placePhoto(ledger, index, selectedPhotoId)).then(success => { if (success) selectedPhotoId = ""; });
+          const photoId = selectedPhotoId;
+          selectedPhotoId = "";
+          updateLibrarySelection(photoId);
+          mutate(ledger => placePhoto(ledger, index, photoId));
           return;
         }
         const slotData = flattenSlots(currentLedger)[index];

@@ -1,5 +1,5 @@
 import { loadCloudConfig, loadLocalCloudConfig } from "./cloud/config.js";
-import { createSupabaseProvider } from "./cloud/supabase-provider.js?v=20261118-ledger-speed1";
+import { createSupabaseProvider } from "./cloud/supabase-provider.js?v=20261119-ledger-speed2";
 import { clearSharedDeviceData, getCloudChanges } from "./storage.js";
 
 const DEVICE_KEY = "aoALB:accountDeviceUid";

@@ -98,7 +98,9 @@ async function createSlot(slot, slotIndex, photosById, loadPhotoFile, objectUrls
     const image = document.createElement("img");
     image.alt = `写真${slotIndex + 1}`;
     const file = await loadPhotoFile(photo.internalId);
-    if (file?.blob) {
+    if (file?.url) {
+      image.src = file.url;
+    } else if (file?.blob) {
       const url = URL.createObjectURL(file.blob);
       objectUrls.add(url);
       image.src = url;

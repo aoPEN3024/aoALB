@@ -2,14 +2,14 @@ import { loadCloudConfig, loadLocalCloudConfig, saveCloudConfig } from "./cloud/
 import { MockSiteProvider } from "./cloud/mock-provider.js";
 import { detectNetworkStatus, formatTransferBytes, networkLabel, NETWORK_STATUS, shouldAutoSync } from "./cloud/network.js";
 import { classifyPhotoSyncError, createPhotoPackage } from "./cloud/photo-sync.js";
-import { createSupabaseProvider } from "./cloud/supabase-provider.js?v=20260911-ledger-library2";
+import { createSupabaseProvider } from "./cloud/supabase-provider.js?v=20261118-ledger-speed1";
 import {
   cacheAllOriginals, clearCurrentSiteCloudCache, cloudDownloadSummary,
   configureCloudReceiver, disconnectCloudReceiver, syncCloudPhotos
 } from "./cloud/receiver.js";
 import {
   configureCloudLedgerSync, disconnectCloudLedgerSync, flushCloudChanges, syncCloudLedgers
-} from "./cloud/ledger-sync.js?v=20260911-ledger-library2";
+} from "./cloud/ledger-sync.js?v=20261118-ledger-speed1";
 import {
   enqueuePhotosForSync, enqueueSyncEvent, getCloudIdentity, getPhotoSyncQueue, getPhotoSyncSettings,
   pendingSyncEvents, recoverInterruptedPhotoUploads, retryPhotoQueueErrors, saveCloudIdentity,

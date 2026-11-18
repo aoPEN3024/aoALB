@@ -1,14 +1,14 @@
 import {
   getProjects, getPhotosByProjectUid,
   getLedgersByProjectId, getLedger
-} from "./storage.js?v=20260911-ledger-library2";
-import { deleteLedgerForProject, saveLedgerForProject } from "./cloud/ledger-sync.js?v=20260911-ledger-library2";
+} from "./storage.js?v=20261118-ledger-speed1";
+import { deleteLedgerForProject, saveLedgerForProject } from "./cloud/ledger-sync.js?v=20261118-ledger-speed1";
 import { loadPhotoAsset } from "./cloud/receiver.js";
 import { effectiveClassification } from "./classification.js";
 import {
   PRINT_TEMPLATE, automaticCaptionFields, renderLedgerPages,
   validateLedgerPages, printLedger
-} from "./print.js";
+} from "./print.js?v=20261118-ledger-speed1";
 
 export const LEDGER_SCHEMA_VERSION = 2;
 export const blankSlot = () => ({ type: "blank" });
@@ -251,7 +251,8 @@ export function initLedgerEditor() {
   let active = false;
   let mutationQueue = Promise.resolve();
   let previewUrls = new Set();
-  let libraryUrls = new Set();
+  const assetUrlCache = new Map();
+  let assetCacheVersion = 0;
   let libraryObserver = null;
   let validation = { valid: false, empty: true, issues: [] };
   let viewMode = localStorage.getItem(LEDGER_VIEW_KEY) === "spread" ? "spread" : "single";
@@ -261,6 +262,7 @@ export function initLedgerEditor() {
   let previewResizeObserver = null;
   let previewScaleFrame = 0;
   let previewValidationTimer = 0;
+  let previewRenderVersion = 0;
   const mobileScroll = { photos: 0, pages: 0 };
   const narrowScreen = window.matchMedia("(max-width: 900px)");
 
@@ -272,7 +274,40 @@ export function initLedgerEditor() {
   function clearLibraryUrls() {
     libraryObserver?.disconnect();
     libraryObserver = null;
-    releaseUrls(libraryUrls);
+  }
+
+  function releaseAssetUrlCache(kind = "") {
+    if (!kind) assetCacheVersion += 1;
+    for (const [key, entry] of assetUrlCache) {
+      if (kind && !key.startsWith(`${kind}:`)) continue;
+      if (entry?.url) URL.revokeObjectURL(entry.url);
+      assetUrlCache.delete(key);
+    }
+  }
+
+  async function cachedPhotoAsset(photoId, kind) {
+    const key = `${kind}:${photoId}`;
+    const cached = assetUrlCache.get(key);
+    if (cached?.url) return cached;
+    if (cached?.promise) return cached.promise;
+    const cacheVersion = assetCacheVersion;
+    const promise = loadPhotoAsset(photoId, kind, kind === "original" ? { network: "wifi_only" } : {})
+      .then(file => {
+        if (cacheVersion !== assetCacheVersion) return null;
+        if (!file?.blob) {
+          if (assetUrlCache.get(key)?.promise === promise) assetUrlCache.delete(key);
+          return null;
+        }
+        const entry = { url: URL.createObjectURL(file.blob), kind, photoId };
+        assetUrlCache.set(key, entry);
+        return entry;
+      })
+      .catch(error => {
+        if (assetUrlCache.get(key)?.promise === promise) assetUrlCache.delete(key);
+        throw error;
+      });
+    assetUrlCache.set(key, { promise });
+    return promise;
   }
 
   function selectedProjectUid() {
@@ -486,22 +521,30 @@ export function initLedgerEditor() {
         if (!entry.isIntersecting) continue;
         const image = entry.target;
         libraryObserver.unobserve(image);
-        loadPhotoAsset(image.dataset.photoId, "thumbnail").then(file => {
-          if (!file?.blob || !image.isConnected) return;
-          const url = URL.createObjectURL(file.blob);
-          libraryUrls.add(url);
-          image.src = url;
+        cachedPhotoAsset(image.dataset.photoId, "thumbnail").then(asset => {
+          if (!asset?.url || !image.isConnected) return;
+          image.src = asset.url;
         }).catch(() => { image.alt = "画像を読み込めません"; });
       }
     }, { rootMargin: "200px" });
     ui.photoList.querySelectorAll("img[data-photo-id]").forEach(image => libraryObserver.observe(image));
   }
 
+  function updateLibrarySelection(previousPhotoId = "") {
+    if (previousPhotoId) ui.photoList.querySelector(`[data-photo-id="${CSS.escape(previousPhotoId)}"]`)?.classList.remove("selected");
+    if (selectedPhotoId) ui.photoList.querySelector(`[data-photo-id="${CSS.escape(selectedPhotoId)}"]`)?.classList.add("selected");
+  }
+
+  function updateLibraryCounts(available = filteredUnplaced()) {
+    ui.unplacedCount.textContent = `${available.length}枚`;
+    ui.mobileUnplaced.textContent = String(available.length);
+    ui.empty.hidden = available.length > 0;
+  }
+
   function renderLibrary() {
     clearLibraryUrls();
     const available = filteredUnplaced();
-    ui.unplacedCount.textContent = `${available.length}枚`;
-    ui.mobileUnplaced.textContent = String(available.length);
+    updateLibraryCounts(available);
     const cards = available.map(photo => {
       const classification = effectiveClassification(photo);
       const card = element("button", `ledger-photo-card${selectedPhotoId === photo.internalId ? " selected" : ""}`);
@@ -516,9 +559,11 @@ export function initLedgerEditor() {
       info.append(element("small", "", [classification.koushu, classification.sokuten].filter(Boolean).join(" / ") || "未分類"));
       card.append(image, info);
       card.addEventListener("click", () => {
+        const previousPhotoId = selectedPhotoId;
         selectedPhotoId = selectedPhotoId === photo.internalId ? "" : photo.internalId;
         selectedSlotIndex = -1;
-        renderLibrary();
+        updateLibrarySelection(previousPhotoId);
+        updatePreviewSlotSelection();
         status(selectedPhotoId ? "配置先の枠をタップしてください。" : "写真の選択を解除しました。");
       });
       card.addEventListener("dragstart", event => {
@@ -528,8 +573,21 @@ export function initLedgerEditor() {
       return card;
     });
     ui.photoList.replaceChildren(...cards);
-    ui.empty.hidden = cards.length > 0;
     if (cards.length) observeLibraryImages();
+  }
+
+  function updateLibraryAfterLedgerChange(previousLedger, nextLedger) {
+    const previous = new Set(placedPhotoIds(previousLedger));
+    const next = new Set(placedPhotoIds(nextLedger));
+    const added = [...next].filter(photoId => !previous.has(photoId));
+    const removed = [...previous].filter(photoId => !next.has(photoId));
+    if (!added.length && !removed.length) return;
+    if (added.length === 1 && !removed.length) {
+      ui.photoList.querySelector(`[data-photo-id="${CSS.escape(added[0])}"]`)?.remove();
+      updateLibraryCounts();
+      return;
+    }
+    renderLibrary();
   }
 
   function renderWarnings(result) {
@@ -571,6 +629,12 @@ export function initLedgerEditor() {
     ui.print.disabled = true;
   }
 
+  function updatePreviewSlotSelection() {
+    for (const slot of ui.pages.querySelectorAll(".ledger-slot.selected")) slot.classList.remove("selected");
+    if (selectedSlotIndex < 0) return;
+    ui.pages.querySelector(`.ledger-slot[data-slot-index="${selectedSlotIndex}"]`)?.classList.add("selected");
+  }
+
   function bindPreviewActions() {
     for (const button of ui.pages.querySelectorAll("[data-ledger-action]")) {
       button.addEventListener("click", event => {
@@ -603,7 +667,7 @@ export function initLedgerEditor() {
           selectedSlotIndex = -1;
         } else if (slotData?.type === "photo") {
           selectedSlotIndex = selectedSlotIndex === index ? -1 : index;
-          renderPreview();
+          updatePreviewSlotSelection();
           status(selectedSlotIndex >= 0 ? "入れ替え先の枠をタップしてください。" : "枠の選択を解除しました。");
         }
       });
@@ -649,15 +713,17 @@ export function initLedgerEditor() {
     if (!active || !currentLedger) return;
     if (previewValidationTimer) clearTimeout(previewValidationTimer);
     const ledgerId = currentLedger.internalId;
+    const renderVersion = previewRenderVersion;
     previewValidationTimer = setTimeout(async () => {
       previewValidationTimer = 0;
-      if (!active || currentLedger?.internalId !== ledgerId) return;
+      if (!active || currentLedger?.internalId !== ledgerId || previewRenderVersion !== renderVersion) return;
       const result = await validatePreview();
-      if (active && currentLedger?.internalId === ledgerId) renderWarnings(result);
-    }, 80);
+      if (active && currentLedger?.internalId === ledgerId && previewRenderVersion === renderVersion) renderWarnings(result);
+    }, 160);
   }
 
-  async function renderPreview() {
+  async function renderPreview({ assetKind = "thumbnail", validateImmediately = false } = {}) {
+    const renderVersion = ++previewRenderVersion;
     releaseUrls(previewUrls);
     if (!currentLedger || !currentProject) {
       ui.pages.replaceChildren();
@@ -666,16 +732,24 @@ export function initLedgerEditor() {
       return;
     }
     ui.guide.hidden = true;
-    const rendered = await renderLedgerPages(ui.pages, {
+    ui.print.disabled = true;
+    const renderTarget = document.createElement("div");
+    const rendered = await renderLedgerPages(renderTarget, {
       ledger: currentLedger, project: currentProject, photos,
-      loadPhotoFile: photoId => loadPhotoAsset(photoId, "original", { network: "wifi_only" }),
+      loadPhotoFile: photoId => cachedPhotoAsset(photoId, assetKind),
       interactive: true, selectedSlotIndex
     });
+    if (renderVersion !== previewRenderVersion) {
+      releaseUrls(rendered.objectUrls);
+      return;
+    }
+    ui.pages.replaceChildren(...renderTarget.childNodes);
     previewUrls = rendered.objectUrls;
     bindPreviewActions();
     applyViewMode();
     updatePreviewScale();
-    renderWarnings(await validatePreview());
+    if (validateImmediately) renderWarnings(await validatePreview());
+    else schedulePreviewValidation();
   }
 
   async function renderAll() {
@@ -704,13 +778,24 @@ export function initLedgerEditor() {
         assertUniquePhotos(transformed);
         transformed.updatedAt = new Date().toISOString();
         currentLedger = transformed;
-        transformed = await saveLedgerForProject(transformed, currentProject, photos);
+        if (!preserveSelection) selectedSlotIndex = -1;
+        const saving = saveLedgerForProject(transformed, currentProject, photos);
+        await Promise.all([
+          saving.then(saved => { transformed = saved; }),
+          (async () => {
+            ui.title.value = transformed.title;
+            ui.showCover.checked = transformed.showCover !== false;
+            updateLibraryAfterLedgerChange(previous, transformed);
+            await renderPreview();
+          })()
+        ]);
         if (currentLedger?.internalId !== transformed.internalId || currentProject?.internalId !== transformed.projectId) return true;
+        currentLedger = transformed;
         const listIndex = ledgers.findIndex(item => item.internalId === transformed.internalId);
         if (listIndex >= 0) ledgers[listIndex] = clone(transformed);
         else ledgers.push(clone(transformed));
-        if (!preserveSelection) selectedSlotIndex = -1;
-        await renderAll();
+        renderLedgerOptions();
+        renderLedgerList();
         status("保存しました");
         return true;
       } catch (error) {
@@ -730,6 +815,7 @@ export function initLedgerEditor() {
   async function loadProject(projectUid, preferredLedgerId = "") {
     releaseUrls(previewUrls);
     clearLibraryUrls();
+    releaseAssetUrlCache();
     currentProject = projects.find(project => project.projectUid === projectUid) || null;
     photos = currentProject ? await getPhotosByProjectUid(currentProject.projectUid) : [];
     ledgers = currentProject ? (await getLedgersByProjectId(currentProject.internalId)).map(normalizeLedger)
@@ -756,6 +842,7 @@ export function initLedgerEditor() {
     stopPreviewObserver();
     releaseUrls(previewUrls);
     clearLibraryUrls();
+    releaseAssetUrlCache();
   }
 
   ui.project.addEventListener("change", () => {
@@ -794,10 +881,24 @@ export function initLedgerEditor() {
   ui.auto.addEventListener("click", () => mutate(ledger => autoArrangeLedger(ledger, photos)));
   ui.addPage.addEventListener("click", () => mutate(addBlankPage));
   ui.print.addEventListener("click", async () => {
-    const result = await validatePreview();
-    renderWarnings(result);
-    if (!validation.valid) return status("印刷できない項目があります。警告内容を確認してください。", true);
-    await printLedger(ui.pages, photos, currentLedger, result);
+    status("印刷用の原寸写真を準備しています…");
+    await renderPreview({ assetKind: "original", validateImmediately: true });
+    if (!validation.valid) {
+      await renderPreview();
+      releaseAssetUrlCache("original");
+      return status("印刷できない項目があります。警告内容を確認してください。", true);
+    }
+    let restored = false;
+    const restoreEditingPreview = async () => {
+      if (restored) return;
+      restored = true;
+      await renderPreview();
+      releaseAssetUrlCache("original");
+    };
+    window.addEventListener("afterprint", restoreEditingPreview, { once: true });
+    await printLedger(ui.pages, photos, currentLedger, validation);
+    setTimeout(restoreEditingPreview, 30000);
+    status("印刷画面を開きました。");
   });
   for (const control of ui.viewModes) {
     control.addEventListener("change", () => {
@@ -917,7 +1018,12 @@ export function initLedgerEditor() {
     if (!active || !event.detail?.deleted || !currentProject) return;
     loadProject(currentProject.projectUid, currentLedger?.internalId || "").catch(error => status(error.message || "台帳一覧を更新できませんでした。", true));
   });
-  window.addEventListener("beforeunload", () => { stopPreviewObserver(); releaseUrls(previewUrls); clearLibraryUrls(); });
+  window.addEventListener("beforeunload", () => {
+    stopPreviewObserver();
+    releaseUrls(previewUrls);
+    clearLibraryUrls();
+    releaseAssetUrlCache();
+  });
 
   return { activate, deactivate, get active() { return active; } };
 }

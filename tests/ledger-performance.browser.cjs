@@ -107,16 +107,24 @@ async function seed(page) {
 
     const placementStarted = Date.now();
     await page.locator('#ledger-pages .ledger-slot.empty').first().click();
-    await page.locator("#ledger-save-status").filter({ hasText: "保存しました" }).waitFor({ timeout: 10000 });
+    await page.waitForFunction(() => document.querySelectorAll("#ledger-photo-list .ledger-photo-card").length === 239);
+    await page.locator("#ledger-photo-list .ledger-photo-card").first().click();
     const placementMs = Date.now() - placementStarted;
     assert.equal(await page.locator("#ledger-photo-list .ledger-photo-card").count(), 239);
+    await page.waitForTimeout(250);
+    assert.equal(await page.locator("#ledger-photo-list .ledger-photo-card.selected").count(), 1, "the next photo selection must survive the previous save completion");
     assert.equal(await page.locator("#ledger-pages .ledger-slot.empty").count(), 2);
     assert.ok(placementMs < 10000, `photo placement took ${placementMs}ms`);
 
+    await page.locator('#ledger-pages .ledger-slot.empty').first().click();
+    await page.waitForFunction(() => document.querySelectorAll("#ledger-photo-list .ledger-photo-card").length === 238);
+    assert.equal(await page.locator("#ledger-photo-list .ledger-photo-card").count(), 238);
+    assert.equal(await page.locator("#ledger-pages .ledger-slot.empty").count(), 1);
+
     await page.reload({ waitUntil: "networkidle" });
     await page.locator("#ledger-pages .ledger-slot").first().waitFor();
-    assert.equal(await page.locator("#ledger-photo-list .ledger-photo-card").count(), 239);
-    assert.equal(await page.locator("#ledger-pages .ledger-slot.empty").count(), 2);
+    assert.equal(await page.locator("#ledger-photo-list .ledger-photo-card").count(), 238);
+    assert.equal(await page.locator("#ledger-pages .ledger-slot.empty").count(), 1);
 
     await page.waitForFunction(() => !document.querySelector("#ledger-print")?.disabled);
     await page.evaluate(() => {

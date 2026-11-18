@@ -15,9 +15,11 @@ assert.match(ledger, /renderPreview\(\{ assetKind: "original", validateImmediate
 assert.match(ledger, /Promise\.all\(\[[^]+saving\.then/);
 assert.match(ledger, /function updatePreviewSlotSelection\(\)/);
 assert.doesNotMatch(ledger, /selectedSlotIndex = selectedSlotIndex === index \? -1 : index;\s*renderPreview\(\)/);
+assert.match(ledger, /const photoId = selectedPhotoId;\s*selectedPhotoId = "";\s*updateLibrarySelection\(photoId\);\s*mutate\(ledger => placePhoto\(ledger, index, photoId\)\);/);
+assert.doesNotMatch(ledger, /then\(success => \{ if \(success\) selectedPhotoId = "";/);
 assert.match(print, /if \(file\?\.url\) \{\s*image\.src = file\.url/);
 
-for (const source of [ledger, app, html]) assert.match(source, /20261118-ledger-speed1/);
-assert.doesNotMatch(`${ledger}\n${app}\n${html}`, /20260911-ledger-library2/);
+for (const source of [ledger, app, html]) assert.match(source, /20261119-ledger-speed2/);
+assert.doesNotMatch(`${ledger}\n${app}\n${html}`, /20261118-ledger-speed1/);
 
 console.log("ledger interaction performance checks passed");

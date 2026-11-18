@@ -3,7 +3,7 @@ import {
   getPhotosByProjectUid, getProjects, recordCloudConflict, resolveClassificationConflict, resolveLedgerConflict, saveLedger,
   deleteLocalLedger,
   saveLedgerWithCloudChange, mergeCloudClassificationOverrides, updateCloudChange
-} from "../storage.js?v=20261118-ledger-speed1";
+} from "../storage.js?v=20261119-ledger-speed2";
 
 let provider = null;
 let identity = null;

@@ -1041,3 +1041,73 @@ fn pdf_size_limit_before_and_during() {
     assert!(!big.within_limit && big.message.unwrap().contains("作成しません"));
     assert_eq!(hashes, originals_hashes(&p));
 }
+
+/// 出力先を確定できない（Windowsで出力先PDFを別ソフトが開いている等）。
+/// ここでは出力先と同名の、中身のあるフォルダを置いて最終renameを必ず失敗させる（Linux・Windowsとも失敗する）。
+fn occupied_dest(dir: &Path, name: &str) -> PathBuf {
+    let dest = dir.join(name);
+    fs::create_dir_all(&dest).unwrap();
+    fs::write(dest.join("開いている.txt"), b"existing").unwrap();
+    dest
+}
+
+fn partial_files(dir: &Path) -> Vec<String> {
+    fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().to_string()).filter(|n| n.contains("partial")).collect()
+}
+
+fn sync_meta(p: &Project) -> Vec<i64> {
+    ["generation", "sync_generation", "sync_edit_seq", "edit_seq"].iter().map(|k| db::meta_i64(&p.conn, k).unwrap()).collect()
+}
+
+#[test]
+fn final_rename_failure_removes_temp_pdf() {
+    let t = tempfile::tempdir().unwrap();
+    let (mut p, l, ids) = ledger_with_photos(t.path(), 6);
+    let s = slot_ids(&ledger::detail(&p.conn, &l).unwrap());
+    ledger::apply_ops(&mut p, &l, &[Op::PlaceMany { from: s[0].clone(), photos: ids.clone() }]).unwrap();
+    let hashes = originals_hashes(&p);
+    let out = t.path().join("out");
+    fs::create_dir_all(&out).unwrap();
+    let dest = occupied_dest(&out, "台帳.pdf");
+    let e = pdf::export_ledger_pdf(&p, &l, &dest, &Cancel::new(), &mut noop()).expect_err("rename must fail");
+    assert_eq!(e.kind, ErrorKind::Locked);
+    assert!(e.message.contains("使用中") && e.message.contains("書き込めません"), "{}", e.message);
+    assert!(e.detail.contains("finalize rename"), "{}", e.detail);
+    assert!(partial_files(&out).is_empty(), "一時ファイルが残った: {:?}", partial_files(&out));
+    assert_eq!(fs::read(dest.join("開いている.txt")).unwrap(), b"existing", "既存の出力先は変更しない");
+    assert_eq!(hashes, originals_hashes(&p));
+    // 出力先が空けば作成できる
+    let ok = out.join("台帳2.pdf");
+    pdf::export_ledger_pdf(&p, &l, &ok, &Cancel::new(), &mut noop()).unwrap();
+    assert!(ok.exists() && partial_files(&out).is_empty());
+}
+
+#[test]
+fn final_rename_failure_removes_temp_exchange_and_keeps_generation() {
+    let t = tempfile::tempdir().unwrap();
+    let mut p = new_project(t.path(), "引継ぎ確定失敗");
+    let src = t.path().join("src");
+    import_files(&mut p, write_photos(&src, 5));
+    let hashes = originals_hashes(&p);
+    let before = sync_meta(&p);
+    let out = t.path().join("out");
+    fs::create_dir_all(&out).unwrap();
+    let dest = occupied_dest(&out, "工事.aoalb");
+    let e = exchange::export(&mut p, &dest, &Cancel::new(), &mut noop()).expect_err("rename must fail");
+    assert_eq!(e.kind, ErrorKind::Locked);
+    assert!(e.message.contains("使用中"), "{}", e.message);
+    assert!(partial_files(&out).is_empty(), "一時ファイルが残った: {:?}", partial_files(&out));
+    assert_eq!(fs::read(dest.join("開いている.txt")).unwrap(), b"existing");
+    assert_eq!(sync_meta(&p), before, "世代・同期記録は一切更新しない");
+    assert_eq!(hashes, originals_hashes(&p));
+    assert!(db::integrity_ok(&p.conn).unwrap());
+    // 再試行で成功すると世代は1つだけ進み、3項目がそろって更新される
+    let ok = out.join("工事2.aoalb");
+    let r = exchange::export(&mut p, &ok, &Cancel::new(), &mut noop()).unwrap();
+    let after = sync_meta(&p);
+    assert_eq!(r.generation, before[0] + 1);
+    assert_eq!(after[0], before[0] + 1);
+    assert_eq!(after[1], after[0]);
+    assert_eq!(after[2], before[3]);
+    assert!(partial_files(&out).is_empty());
+}

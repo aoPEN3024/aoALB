@@ -279,11 +279,28 @@ pub fn export(project: &mut Project, dest: &Path, cancel: &Cancel, progress: Pro
     })();
     match result {
         Ok(mut r) => {
-            fs::rename(&tmp, dest)?;
+            // 世代の記録は1トランザクション。出力先を確定できなければ取り消し、途中まで更新した状態を残さない。
+            let tx = match project.conn.transaction() {
+                Ok(tx) => tx,
+                Err(e) => {
+                    let _ = fs::remove_file(&tmp);
+                    return Err(e.into());
+                }
+            };
+            let recorded = (|| -> Result<()> {
+                db::set_meta(&tx, "generation", &generation.to_string())?;
+                db::set_meta(&tx, "sync_generation", &generation.to_string())?;
+                db::set_meta(&tx, "sync_edit_seq", &edit_seq.to_string())
+            })();
+            if let Err(e) = recorded {
+                drop(tx);
+                let _ = fs::remove_file(&tmp);
+                return Err(e);
+            }
+            // 失敗時は tx を破棄（ロールバック）。一時ファイルは finalize_output が消す。
+            util::finalize_output(&tmp, dest)?;
+            tx.commit()?;
             r.bytes = fs::metadata(dest)?.len();
-            db::set_meta(&project.conn, "generation", &generation.to_string())?;
-            db::set_meta(&project.conn, "sync_generation", &generation.to_string())?;
-            db::set_meta(&project.conn, "sync_edit_seq", &edit_seq.to_string())?;
             Ok(r)
         }
         Err(e) => {

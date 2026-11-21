@@ -618,7 +618,7 @@ pub fn export_ledger_pdf_with(
     })();
     match result {
         Ok(mut r) => {
-            fs::rename(&tmp, dest)?;
+            util::finalize_output(&tmp, dest)?;
             r.bytes = fs::metadata(dest)?.len();
             Ok(r)
         }

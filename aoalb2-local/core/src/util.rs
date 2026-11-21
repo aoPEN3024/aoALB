@@ -60,6 +60,21 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// 出力先を確定できない時の案内（PDF・引継ぎファイル共通）
+pub const OUTPUT_BUSY_MESSAGE: &str =
+    "出力先のファイルが使用中か、書き込めません。PDF閲覧ソフトなどで開いている場合は閉じてから、もう一度作成するか、別の名前で保存してください。";
+
+/// 書き終えた一時ファイルを出力先へ確定する。失敗したら一時ファイルを必ず消す（既存の出力先は変更しない）。
+pub fn finalize_output(tmp: &Path, dest: &Path) -> Result<()> {
+    fs::rename(tmp, dest).map_err(|e| {
+        let _ = fs::remove_file(tmp);
+        if matches!(e.raw_os_error(), Some(28) | Some(112) | Some(39)) {
+            return AppError::from(e);
+        }
+        AppError::new(crate::error::ErrorKind::Locked, OUTPUT_BUSY_MESSAGE).with_detail(format!("finalize rename: {e}"))
+    })
+}
+
 pub fn tmp_sibling(path: &Path) -> PathBuf {
     let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
     path.with_file_name(format!(".{name}.{}.partial", uuid::Uuid::new_v4().simple()))

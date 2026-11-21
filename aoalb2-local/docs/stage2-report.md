@@ -23,9 +23,9 @@
 | 工事エクスポート／インポート（.aoalb、ZIP64、世代警告、置換・別工事） | 済 | 自動検証（4.3GBを含む） |
 | バックアップ・検証・復元 | 済 | 自動検証 |
 
-![写真を整理する](images/photos.jpg)
-![台帳編集](images/editor.jpg)
-![台帳一覧](images/ledgers.jpg)
+![写真を整理する](images/photos.png)
+![台帳編集](images/editor.png)
+![台帳一覧](images/ledgers.png)
 ![PDF（表紙・3枠・空白・縦横の向き補正・同梱フォント埋込み）](images/pdf-sample.png)
 
 ## 2. 自動検証

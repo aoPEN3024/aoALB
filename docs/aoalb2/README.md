@@ -1,25 +1,8 @@
-# aoALB 2（仮称）調査・設計
+# aoALB 2
 
-「写真の出所を選ばない、クラウド型の工事写真台帳アプリ」として全面刷新するための第1段階（現状調査）と第2段階（設計）。
-
-**このブランチはドキュメントとSQL草案だけを追加する。現行aoALBのコード・migration・本番環境は一切変更しない。**
-
-| ファイル | 内容 |
+| 資料 | 位置付け |
 |---|---|
-| [01-current-state.md](01-current-state.md) | 現行構造、根本問題、高CPU原因候補、引継ぎ・廃止一覧 |
-| [02-architecture.md](02-architecture.md) | 構成、データモデル、認証・権限、取込み、分類、台帳編集、同期、オフライン、エラー回復、性能、セキュリティ |
-| [03-migration-and-plan.md](03-migration-and-plan.md) | 旧データ移行、Freeプラン容量見積り、段階計画、ロールバック、リスク、未決事項 |
-| [sql/01-readonly-cpu-investigation.sql](sql/01-readonly-cpu-investigation.sql) | 現行本番の高CPU調査SQL（読取り専用トランザクション、SELECT／EXPLAINのみ） |
-| [sql/02-schema-draft.sql](sql/02-schema-draft.sql) | 新スキーマ草案（実行防止ガードつき、migrationではない） |
-
-## 要約
-
-- **根本問題**：クラウド正本とされながら、実装は「台帳全体・写真全体のスナップショット往復」。1件の変更が全端末の全件再取得と台帳の全削除・全再作成を起こす。
-- **高CPUの有力候補**：(A) Realtime受信ごとに全端末が全台帳・全写真を再取得、(B) 配置1回ごとの台帳全削除・再作成とO(枠数²)の重複チェック、(C) 送信中の追加操作による自己競合、(D) RLSの行ごと多段関数、(E) Storage読取りポリシーの `photo_objects` 走査、(F) インデックス不足と無制限に増える表。本番の実測で確定が必要。
-- **推奨構成**：新Supabaseプロジェクト、クラウド正本、IndexedDBはキャッシュと未送信キューのみ、操作単位（op）の保存と変更番号による差分同期、メール＋パスワードと工事所属だけの権限、仮想スクロールとJPEG無変換のPDF。
-- **Freeプラン**：aoPIC写真中心の試験（約2,000枚まで）は可。デジカメ写真を本番で扱うならファイル容量が不足（比較案はPro／Free＋R2）。
-
-## 調査範囲の制約
-
-- 本番Supabaseには接続していない。DB・Storage・ログ・Realtimeの実数値は未取得。
-- 根拠はリポジトリのコード（`aoalb` 8ef3fe5、`aopic` a5790a0）。
+| [aoalb2-local/](../../aoalb2-local/README.md) | **現在の主対象**：Windows向け個人用ローカル写真台帳（ログイン・クラウドなし） |
+| [aoalb2-local/docs/design.md](../../aoalb2-local/docs/design.md) | ローカル版の設計書（段階1） |
+| [aoalb2-local/docs/stage2-report.md](../../aoalb2-local/docs/stage2-report.md) | 最小プロトタイプの結果（段階2） |
+| [future-cloud/](future-cloud/README.md) | 将来のクラウド対応案（2026-11-20作成、主対象外として保管）。現行aoALBの調査結果を含む |

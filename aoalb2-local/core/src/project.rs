@@ -59,6 +59,8 @@ pub struct OpenReport {
     pub missing_thumbnails: u64,
     pub cleaned_temp_files: u64,
     pub cancelled_imports: u64,
+    /// 原寸はあるが一覧に登録されていない写真（復旧できる）
+    pub unregistered_originals: usize,
 }
 
 pub struct Project {
@@ -175,6 +177,8 @@ pub fn open_project(root: &Path, device_id: &str) -> Result<(Project, OpenReport
             }
         }
     }
+    // 開くたびに確認する（ファイル名とDBの突き合わせだけなので数千枚でも数十ms）
+    report.unregistered_originals = crate::recover::find_unregistered(&conn, root)?.0.len();
     db::set_meta(&conn, "open_state", "open")?;
     Ok((Project { root: root.to_path_buf(), conn, uuid, device_id: device_id.into(), _lock: lock }, report))
 }

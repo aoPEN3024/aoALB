@@ -377,6 +377,9 @@ fn pdf_embeds_jpeg_without_recompression() {
     let mut f = serde_json::Map::new();
     f.insert("body".into(), serde_json::json!("長い文言".repeat(200)));
     ledger::apply_ops(&mut p, &l, &[Op::SetCaption { photo: ids[0].clone(), fields: f }]).unwrap();
+    let mut f2 = serde_json::Map::new();
+    f2.insert("body".into(), serde_json::json!("髙﨑①㈱ 𠮷野家 😀"));
+    ledger::apply_ops(&mut p, &l, &[Op::SetCaption { photo: ids[1].clone(), fields: f2 }]).unwrap();
     let out = p.root.join("exports").join("台帳.pdf");
     let r = pdf::export_ledger_pdf(&p, &l, &out, &Cancel::new(), &mut noop()).unwrap();
     assert_eq!(r.images, 5);
@@ -384,6 +387,13 @@ fn pdf_embeds_jpeg_without_recompression() {
     assert!(r.warnings.iter().any(|w| w.message.contains("文言が長く")));
     let bytes = fs::read(&out).unwrap();
     assert!(bytes.starts_with(b"%PDF-1.6"));
+    // 同梱フォントを必ず埋め込む（端末・閲覧ソフトのフォントに依存しない）
+    assert!(r.font.contains("BIZ UD"));
+    assert!(bytes.windows(10).any(|w| w == b"/FontFile2"));
+    assert!(!bytes.windows(14).any(|w| w == b"HeiseiKakuGo-W"));
+    // 収録外の文字は警告（髙・﨑・①・㈱は収録済み）
+    let miss = r.warnings.iter().find(|w| w.message.contains("印刷できない文字")).expect("missing-char warning");
+    assert!(miss.message.contains("𠮷") && miss.message.contains("😀") && !miss.message.contains("髙"));
     // 原寸JPEGのバイト列がそのまま含まれている（再圧縮していない）
     let orig = fs::read(p.original_path(&ids[3])).unwrap();
     assert!(bytes.windows(orig.len()).any(|w| w == orig.as_slice()));
@@ -642,4 +652,76 @@ fn huge_exchange_over_4gb() {
     let imp = exchange::import(&file, &base.join("B"), ImportMode::New, "device-b", &Cancel::new(), &mut noop()).unwrap();
     assert_eq!(imp.photos, 46);
     let _ = fs::remove_dir_all(&base);
+}
+
+/// 古いバックアップへ復元しても、その後に取り込んだ写真を黙って消さない（aoPIC情報・分類の上書きも戻す）
+#[test]
+fn restore_old_backup_keeps_later_photos() {
+    let t = tempfile::tempdir().unwrap();
+    let mut p = new_project(t.path(), "復元工事");
+    import_files(&mut p, write_photos(&t.path().join("src1"), 2));
+    let l = ledger::create(&mut p, "台帳", 1).unwrap();
+    let b = backup::create(&p, backup::Reason::Manual).unwrap();
+    // バックアップ後に取り込んだ写真（aoPIC 3枚＋一般 2枚）と分類の変更
+    let zip = t.path().join("later.zip");
+    synth::aopic_zip(&zip, 3);
+    photos::import(&mut p, &ImportSource::Zip { path: zip }, ImportOptions::default(), &Cancel::new(), &mut noop()).unwrap();
+    let later_general = write_photos(&t.path().join("src2"), 2).into_iter().map(|f| { let b = synth::with_comment(&fs::read(&f).unwrap(), "later"); fs::write(&f, b).unwrap(); f }).collect();
+    import_files(&mut p, later_general);
+    let all_before: Vec<_> = photos::list_photos(&p.conn, &PhotoFilter::default()).unwrap();
+    assert_eq!(all_before.len(), 7);
+    let later_ids: Vec<String> = all_before.iter().filter(|x| x.source_kind == "aopic").map(|x| x.uuid.clone()).collect();
+    let mut ch = BTreeMap::new();
+    ch.insert("shubetsu".to_string(), FieldChange::Set("変更後の種別".into()));
+    classify::apply(&mut p, &later_ids[..1].to_vec(), &ch).unwrap();
+    let s0 = ledger::detail(&p.conn, &l.uuid).unwrap().pages[0].slots[0].uuid.clone();
+    ledger::apply_ops(&mut p, &l.uuid, &[Op::Place { slot: s0, photo: later_ids[0].clone() }]).unwrap();
+    // 古いバックアップへ復元
+    let r = backup::restore(&mut p, &b.name).unwrap();
+    assert_eq!(r.recovery.found, 5);
+    assert_eq!(r.recovery.recovered_from_backup, 5, "復元前の自動バックアップから記録を戻す");
+    assert_eq!(r.recovery.recovered_from_file, 0);
+    let after = photos::list_photos(&p.conn, &PhotoFilter::default()).unwrap();
+    assert_eq!(after.len(), 7, "一覧から消えない");
+    let a = after.iter().find(|x| x.uuid == later_ids[0]).unwrap();
+    assert_eq!(a.source_kind, "aopic");
+    assert!(a.photo_uid.is_some());
+    assert_eq!(a.classification.shubetsu, "変更後の種別");
+    assert_eq!(a.original.shubetsu, "橋梁塗装");
+    // 台帳は復元した時点の状態（配置は戻らない）
+    assert!(ledger::detail(&p.conn, &l.uuid).unwrap().pages[0].slots[0].photo_uuid.is_none());
+    assert!(db::integrity_ok(&p.conn).unwrap());
+    // 再度開いても未登録は0
+    let root = p.root.clone();
+    p.close().unwrap();
+    let (_p, rep) = project::open_project(&root, DEV).unwrap();
+    assert_eq!(rep.unregistered_originals, 0);
+}
+
+/// DBに登録されていない原寸（異常終了など）を検出し、ファイルから復旧する。読めないファイル・他のファイルは触らない
+#[test]
+fn unregistered_originals_detect_and_recover_from_file() {
+    let t = tempfile::tempdir().unwrap();
+    let mut p = new_project(t.path(), "未登録工事");
+    import_files(&mut p, write_photos(&t.path().join("src"), 1));
+    let orphan = util::new_uuid();
+    let broken = util::new_uuid();
+    let jpeg = synth::with_exif(&synth::jpeg(400, 300, 9, 80), Some("2026:09:15 08:30:00"), Some(6));
+    fs::write(p.original_path(&orphan), &jpeg).unwrap();
+    fs::write(p.original_path(&broken), b"not a jpeg").unwrap();
+    fs::write(p.originals_dir().join("memo.txt"), b"user file").unwrap();
+    let root = p.root.clone();
+    p.close().unwrap();
+    let (mut p, rep) = project::open_project(&root, DEV).unwrap();
+    assert_eq!(rep.unregistered_originals, 2);
+    let r = aoalb_core::recover::recover_unregistered(&mut p, &Cancel::new()).unwrap();
+    assert_eq!((r.found, r.recovered_from_file, r.failed.len(), r.other_files), (2, 1, 1, 1));
+    let row = photos::list_photos(&p.conn, &PhotoFilter { uuids: Some(vec![orphan.clone()]), ..Default::default() }).unwrap().remove(0);
+    assert_eq!(row.taken_at.as_deref(), Some("2026-09-15T08:30:00"));
+    assert_eq!(row.orientation, 6);
+    assert_eq!(row.folder_label, "復旧した写真");
+    let d = photos::photo_detail(&p, &orphan).unwrap();
+    assert_eq!(d.sha256, synth::sha256(&jpeg), "原寸はそのまま");
+    assert!(p.original_path(&broken).exists() && p.originals_dir().join("memo.txt").exists(), "読めないファイルも削除しない");
+    assert!(backup::list(&p).unwrap().iter().any(|b| b.reason == "before-recovery"));
 }

@@ -10,6 +10,7 @@ pub mod ledger;
 pub mod pdf;
 pub mod photos;
 pub mod project;
+pub mod recover;
 pub mod synth;
 pub mod util;
 

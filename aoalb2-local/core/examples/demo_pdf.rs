@@ -26,7 +26,7 @@ fn main() {
     let r = ledger::apply_ops(&mut p, &l.uuid, &[Op::PlaceMany { from: s0, photos: ids.clone() }]).unwrap();
     let s = r.detail.pages[1].slots[0].uuid.clone();
     let mut f = serde_json::Map::new();
-    f.insert("body".into(), serde_json::json!("下塗り完了状況。\n膜厚測定：規定値以上を確認。ABC-123 半角混在テスト。"));
+    f.insert("body".into(), serde_json::json!("下塗り完了状況。\n膜厚測定：規定値以上を確認。ABC-123 半角混在テスト。髙﨑①㈱"));
     ledger::apply_ops(&mut p, &l.uuid, &[Op::InsertBlank { slot: s }, Op::SetCaption { photo: ids[3].clone(), fields: f },
         Op::SetCover { cover: serde_json::json!({"title": "工事写真帳", "koushu": "塗装工", "project": "架空 橋梁塗装工事", "contractor": "架空建設株式会社"}) }]).unwrap();
     let r = pdf::export_ledger_pdf(&p, &l.uuid, &out.join("ledger.pdf"), &Cancel::new(), &mut |_| {}).unwrap();

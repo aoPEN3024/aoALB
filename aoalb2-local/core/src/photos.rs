@@ -112,9 +112,9 @@ struct Prepared {
     bytes: u64,
 }
 
-struct JpegInfo { width: u32, height: u32, components: u8, adobe_cmyk: bool }
+pub(crate) struct JpegInfo { pub width: u32, pub height: u32, pub components: u8, pub adobe_cmyk: bool }
 
-fn read_jpeg_info(path: &Path) -> Result<JpegInfo> {
+pub(crate) fn read_jpeg_info(path: &Path) -> Result<JpegInfo> {
     let mut d = jpeg_decoder::Decoder::new(BufReader::new(File::open(path)?));
     d.read_info().map_err(|e| AppError::invalid("写真として読み取れません（JPEGが壊れている可能性があります）。").with_detail(e.to_string()))?;
     let info = d.info().ok_or_else(|| AppError::invalid("写真として読み取れません。"))?;
@@ -127,9 +127,9 @@ fn read_jpeg_info(path: &Path) -> Result<JpegInfo> {
 }
 
 #[derive(Default)]
-struct ExifData { orientation: u32, taken_at: Option<String>, json: Value }
+pub(crate) struct ExifData { pub orientation: u32, pub taken_at: Option<String>, pub json: Value }
 
-fn read_exif(path: &Path) -> ExifData {
+pub(crate) fn read_exif(path: &Path) -> ExifData {
     let mut out = ExifData { orientation: 1, ..Default::default() };
     let Ok(f) = File::open(path) else { return out };
     let Ok(exif) = exif::Reader::new().read_from_container(&mut BufReader::new(f)) else { return out };
@@ -152,7 +152,7 @@ fn read_exif(path: &Path) -> ExifData {
     out
 }
 
-fn file_time_label(path: &Path) -> Option<String> {
+pub(crate) fn file_time_label(path: &Path) -> Option<String> {
     let m = fs::metadata(path).ok()?.modified().ok()?;
     let dt: chrono::DateTime<chrono::Local> = m.into();
     Some(dt.format("%Y-%m-%dT%H:%M:%S%:z").to_string())

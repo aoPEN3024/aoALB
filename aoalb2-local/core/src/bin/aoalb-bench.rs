@@ -23,13 +23,15 @@ fn io() -> (u64, u64) { (proc_kv("/proc/self/io", "rchar:"), proc_kv("/proc/self
 struct M { out: BTreeMap<String, Value> }
 impl M {
     fn time<T>(&mut self, name: &str, f: impl FnOnce() -> T) -> T {
+        // 工程ごとの最大メモリを測るため、最大値の記録を戻す（Linux）
+        let _ = std::fs::write("/proc/self/clear_refs", "5");
         let (r0, w0) = io();
         let t = Instant::now();
         let v = f();
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         let (r1, w1) = io();
         self.out.insert(name.into(), json!({"ms": (ms * 10.0).round() / 10.0, "readMB": ((r1 - r0) as f64 / 1048576.0 * 10.0).round() / 10.0,
-            "writeMB": ((w1 - w0) as f64 / 1048576.0 * 10.0).round() / 10.0, "rssMB": rss_mb().round()}));
+            "writeMB": ((w1 - w0) as f64 / 1048576.0 * 10.0).round() / 10.0, "rssMB": rss_mb().round(), "peakMB": peak_mb().round()}));
         v
     }
     fn note(&mut self, name: &str, v: Value) { self.out.insert(name.into(), v); }
@@ -42,7 +44,11 @@ fn main() {
     std::fs::create_dir_all(work.join("src")).unwrap();
     let mut m = M { out: BTreeMap::new() };
     // 架空写真の準備（計測外）
-    let cams = [synth::jpeg(4000, 3000, 1, 88), synth::jpeg(4000, 3000, 2, 88), synth::jpeg(3000, 4000, 3, 88)];
+    // BENCH_REAL=1：実際のデジカメ並みの容量（1枚約5MB、細かい模様で圧縮が効かない）の架空写真を使う
+    let real = std::env::var("BENCH_REAL").is_ok();
+    let cams = if real { [synth::noisy_jpeg(4000, 3000, 1), synth::noisy_jpeg(4000, 3000, 2), synth::noisy_jpeg(3000, 4000, 3)] }
+        else { [synth::jpeg(4000, 3000, 1, 88), synth::jpeg(4000, 3000, 2, 88), synth::jpeg(3000, 4000, 3, 88)] };
+    m.note("generalJpegBytes", json!(cams.iter().map(|c| c.len()).collect::<Vec<_>>()));
     let general = n * 7 / 10;
     let mut files = Vec::new();
     for i in 0..general {
@@ -55,10 +61,13 @@ fn main() {
     let src_mb: f64 = files.iter().map(|f| std::fs::metadata(f).unwrap().len()).sum::<u64>() as f64 / 1048576.0;
     m.note("photos", json!({"total": n, "general": general, "aopic": aopic_n, "generalSourceMB": src_mb.round()}));
 
+    drop(cams);
     let start_rss = rss_mb();
     let mut p = m.time("create_project", || project::create_project(&work.join("data"), &NewProject { name: "性能計測工事".into(), ..Default::default() }, "bench").unwrap());
     let r = m.time("import_general", || photos::import(&mut p, &ImportSource::Files { paths: files.clone() }, ImportOptions::default(), &Cancel::new(), &mut |_| {}).unwrap());
     assert_eq!(r.accepted as usize, general);
+    // 容量節約：取込み元はもう使わない
+    for f in &files { let _ = std::fs::remove_file(f); }
     if aopic_n > 0 { m.time("import_aopic_zip", || photos::import(&mut p, &ImportSource::Zip { path: work.join("src/aopic.zip") }, ImportOptions::default(), &Cancel::new(), &mut |_| {}).unwrap()); }
     let thumbs = m.time("thumbnails_all", || { let mut t = 0; loop { let k = photos::process_pending_thumbnails(&p.conn, &p.root, 200, &Cancel::new()).unwrap(); if k == 0 { break t; } t += k; } });
     m.note("thumbnail_count", json!(thumbs));
@@ -109,12 +118,14 @@ fn main() {
         m.time("ledger_list_50", || ledger::list(&p.conn, false).unwrap());
         let pdf_path = p.root.join("exports").join("計測台帳.pdf");
         let pr = m.time("pdf_ledger_all", || pdf::export_ledger_pdf(&p, &l.uuid, &pdf_path, &Cancel::new(), &mut |_| {}).unwrap());
-        m.note("pdf", json!({"pages": pr.pages, "images": pr.images, "MB": (pr.bytes as f64 / 1048576.0).round(), "decodedOriginals": 0}));
+        m.note("pdf", json!({"pages": pr.pages, "images": pr.images, "MB": (pr.bytes as f64 / 1048576.0).round(), "originalsMB": (photos::list_photos(&p.conn, &PhotoFilter::default()).unwrap().iter().map(|x| x.bytes).sum::<i64>() as f64 / 1048576.0).round(), "decodedOriginals": 0, "font": pr.font}));
     }
+    let _ = std::fs::remove_file(p.root.join("exports").join("計測台帳.pdf"));
     m.time("backup_db", || backup::create(&p, backup::Reason::Manual).unwrap());
     let ex = work.join("transfer").join("計測.aoalb");
     let er = m.time("export_aoalb", || exchange::export(&mut p, &ex, &Cancel::new(), &mut |_| {}).unwrap());
     m.note("export_MB", json!((er.bytes as f64 / 1048576.0).round()));
+    m.note("originals_MB", json!((std::fs::read_dir(p.originals_dir()).unwrap().map(|e| e.unwrap().metadata().unwrap().len()).sum::<u64>() as f64 / 1048576.0).round()));
     let ir = m.time("import_aoalb", || exchange::import(&ex, &work.join("deviceB"), ImportMode::New, "bench-b", &Cancel::new(), &mut |_| {}).unwrap());
     m.note("import_photos", json!(ir.photos));
     m.note("memory", json!({"startRssMB": start_rss.round(), "peakRssMB": peak_mb().round()}));

@@ -19,6 +19,21 @@ pub fn jpeg(w: u32, h: u32, seed: u32, quality: u8) -> Vec<u8> {
     out
 }
 
+/// 細かい模様で圧縮が効かない、実際のデジカメ写真並みの容量（4000×3000で約5MB）の架空JPEG
+pub fn noisy_jpeg(w: u32, h: u32, seed: u32) -> Vec<u8> {
+    let mut img = image::RgbImage::new(w, h);
+    let mut x: u32 = seed.wrapping_mul(2654435761).max(1);
+    for (px, py, p) in img.enumerate_pixels_mut() {
+        x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+        let base = ((px / 8 + py / 8 + seed) % 200) as u8;
+        *p = image::Rgb([base.wrapping_add((x & 0x0F) as u8), base.wrapping_add(((x >> 8) & 0x0F) as u8), base.wrapping_add(((x >> 16) & 0x0F) as u8)]);
+    }
+    for y in 0..(h / 8) { for x in 0..(w / 8) { img.put_pixel(x, y, image::Rgb([255, 255, 255])); } }
+    let mut out = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 88).encode_image(&img).unwrap();
+    out
+}
+
 /// SOI直後にCOMセグメントを入れて、画像は同じでもSHA-256が異なるJPEGにする
 pub fn with_comment(jpeg: &[u8], text: &str) -> Vec<u8> {
     let mut out = Vec::with_capacity(jpeg.len() + text.len() + 4);

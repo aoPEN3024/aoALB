@@ -15,15 +15,15 @@ pub const KEEP_AUTOMATIC: usize = 30;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum Reason { Periodic, Manual, BeforeImportReplace, BeforeLedgerDelete, BeforeRestore, BeforeImportPhotos, OnClose }
+pub enum Reason { Periodic, Manual, BeforeImportReplace, BeforeLedgerDelete, BeforeRestore, BeforeImportPhotos, OnClose, BeforeRecovery }
 impl Reason {
     fn slug(self) -> &'static str {
         match self { Reason::Periodic => "periodic", Reason::Manual => "manual", Reason::BeforeImportReplace => "before-import-replace",
-            Reason::BeforeLedgerDelete => "before-ledger-delete", Reason::BeforeRestore => "before-restore", Reason::BeforeImportPhotos => "before-import-photos", Reason::OnClose => "on-close" }
+            Reason::BeforeLedgerDelete => "before-ledger-delete", Reason::BeforeRestore => "before-restore", Reason::BeforeImportPhotos => "before-import-photos", Reason::OnClose => "on-close", Reason::BeforeRecovery => "before-recovery" }
     }
     pub fn label(slug: &str) -> &'static str {
         match slug { "periodic" => "定期", "manual" => "手動", "before-import-replace" => "引継ぎファイルで置き換える前", "before-ledger-delete" => "台帳削除の前",
-            "before-restore" => "復元の前", "before-import-photos" => "写真取込みの前", "on-close" => "工事を閉じる時", _ => "その他" }
+            "before-restore" => "復元の前", "before-import-photos" => "写真取込みの前", "on-close" => "工事を閉じる時", "before-recovery" => "写真の復旧の前", _ => "その他" }
     }
 }
 
@@ -157,8 +157,18 @@ pub fn verify(project: &Project, name: &str) -> Result<VerifyReport> {
         message: if ok { "このバックアップは正常です。".into() } else { format!("原寸写真が{missing}枚見つかりません。") } })
 }
 
-/// バックアップから復元する。復元前の状態も自動でバックアップする。
-pub fn restore(project: &mut Project, name: &str) -> Result<BackupInfo> {
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreReport {
+    /// 復元前の状態を保存したバックアップ
+    pub before: BackupInfo,
+    /// 復元した時点より後に取り込まれていた写真を一覧へ戻した結果（黙って消さない）
+    pub recovery: crate::recover::RecoveryReport,
+}
+
+/// バックアップから復元する。復元前の状態も自動でバックアップし、
+/// 復元後に一覧から外れた原寸写真（復元時点より後に取り込んだもの）は自動で一覧へ戻す。
+pub fn restore(project: &mut Project, name: &str) -> Result<RestoreReport> {
     safe_name(name)?;
     let path = dir(project).join(name);
     verify_file(&path, &project.uuid)?;
@@ -169,5 +179,6 @@ pub fn restore(project: &mut Project, name: &str) -> Result<BackupInfo> {
     Project::touch(&project.conn, &project.device_id)?;
     // 復元した世代に合わせてサムネイルの有無を確認し直す
     crate::photos::reset_thumbnails(&project.conn, &project.root)?;
-    Ok(before)
+    let recovery = crate::recover::recover_unregistered(project, &crate::util::Cancel::new())?;
+    Ok(RestoreReport { before, recovery })
 }

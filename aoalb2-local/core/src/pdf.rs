@@ -4,8 +4,8 @@
 //! - EXIFの向きは画像を書き換えず、PDFの座標変換で補正する。
 //! - 書出し中は `*.partial` に書き、完成後に名前を確定する（途中失敗を完成品として残さない）。
 //! - レイアウトは現行aoALBの印刷CSS（A4縦・1ページ3枠・写真68.3%／文言31.7%）に合わせる。
-//! - 日本語は端末の日本語フォント（埋込み許可のあるもの）から使用文字だけを抜き出して埋め込む。
-//!   使えるフォントがない場合だけ、閲覧ソフト側のフォントに頼る標準CJKフォント指定にする。
+//! - 日本語はアプリに同梱した BIZ UDゴシック（SIL OFL 1.1、fonts/ 参照）から使用文字だけを抜き出して埋め込む。
+//!   端末や閲覧ソフトのフォントには依存しない。収録外の文字は「〓」にして警告する。
 
 use crate::error::{AppError, Result};
 use crate::ledger::{self, LedgerDetail};
@@ -17,6 +17,11 @@ use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{BufWriter, Seek, Write};
 use std::path::Path;
+
+/// 同梱フォント（BIZ UDゴシック Regular 1.05、SIL OFL 1.1。ライセンスは core/fonts/OFL.txt）
+pub const BUNDLED_FONT: &[u8] = include_bytes!("../fonts/BIZUDGothic-Regular.ttf");
+pub const BUNDLED_FONT_NAME: &str = "BIZ UDゴシック（同梱）";
+pub const BUNDLED_FONT_LICENSE: &str = include_str!("../fonts/OFL.txt");
 
 const MM: f64 = 72.0 / 25.4;
 const PAGE_W: f64 = 210.0;
@@ -72,18 +77,20 @@ pub struct TextFont<'a> {
     remapper: subsetter::GlyphRemapper,
     /// 新グリフID → 文字（コピー・検索用のToUnicode）
     used: std::collections::BTreeMap<u16, char>,
+    /// フォントに無かった文字（「〓」で代用）
+    pub missing: std::collections::BTreeSet<char>,
     pub name: String,
 }
 
 impl<'a> TextFont<'a> {
-    pub fn builtin() -> Self { Self { face: None, data: &[], index: 0, remapper: subsetter::GlyphRemapper::new(), used: Default::default(), name: "builtin".into() } }
+    pub fn builtin() -> Self { Self { face: None, data: &[], index: 0, remapper: subsetter::GlyphRemapper::new(), used: Default::default(), missing: Default::default(), name: "builtin".into() } }
     pub fn embedded(data: &'a [u8], index: u32, name: String) -> Option<Self> {
         let face = ttf_parser::Face::parse(data, index).ok()?;
         if matches!(face.permissions(), Some(ttf_parser::Permissions::Restricted)) || !face.is_subsetting_allowed() { return None; }
         face.glyph_index('あ')?;
         let mut remapper = subsetter::GlyphRemapper::new();
         remapper.remap(0);
-        Some(Self { face: Some(face), data, index, remapper, used: Default::default(), name })
+        Some(Self { face: Some(face), data, index, remapper, used: Default::default(), missing: Default::default(), name })
     }
     fn glyph(&self, c: char) -> Option<ttf_parser::GlyphId> { self.face.as_ref().and_then(|f| f.glyph_index(c).or_else(|| f.glyph_index('〓'))) }
     pub fn char_w(&self, c: char) -> f64 {
@@ -96,6 +103,8 @@ impl<'a> TextFont<'a> {
         if self.face.is_none() { return hex_text(s); }
         let mut out = String::from("<");
         for c in s.chars() {
+            let c = if c == '\t' { ' ' } else { c };
+            if self.face.as_ref().map(|f| f.glyph_index(c).is_none()).unwrap_or(false) { self.missing.insert(c); }
             let g = self.glyph(c).map(|g| g.0).unwrap_or(0);
             let n = self.remapper.remap(g);
             self.used.entry(n).or_insert(c);
@@ -122,7 +131,7 @@ impl<'a> TextFont<'a> {
         }
         let ff = pdf.reserve();
         let tu = pdf.reserve();
-        let base = "AAAAAA+aoALB2Font";
+        let base = "AAAAAA+BIZUDGothic-Regular";
         let (subtype, file_key) = if cff { ("/CIDFontType0", "/FontFile3") } else { ("/CIDFontType2", "/FontFile2") };
         pdf.obj(font, &format!("<< /Type /Font /Subtype /Type0 /BaseFont /{base} /Encoding /Identity-H /DescendantFonts [{cid} 0 R] /ToUnicode {tu} 0 R >>"))?;
         pdf.obj(cid, &format!("<< /Type /Font /Subtype {subtype} /BaseFont /{base} /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor {desc} 0 R /DW 1000 /W [{widths}]{} >>",
@@ -146,33 +155,6 @@ impl<'a> TextFont<'a> {
         cmap.push_str("endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n");
         pdf.stream(tu, "", cmap.as_bytes())
     }
-}
-
-/// 埋め込みに使う日本語フォントを探す（候補の順に、埋込み許可のあるもの）
-pub fn default_font_candidates() -> Vec<std::path::PathBuf> {
-    let mut v: Vec<std::path::PathBuf> = Vec::new();
-    if let Ok(p) = std::env::var("AOALB2_PDF_FONT") { v.push(p.into()); }
-    for p in ["C:\\Windows\\Fonts\\BIZ-UDGothicR.ttc", "C:\\Windows\\Fonts\\YuGothM.ttc", "C:\\Windows\\Fonts\\meiryo.ttc", "C:\\Windows\\Fonts\\msgothic.ttc",
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc"] { v.push(p.into()); }
-    v
-}
-
-pub fn load_font(candidates: &[std::path::PathBuf]) -> Option<(Vec<u8>, u32, String)> {
-    for path in candidates {
-        let Ok(data) = fs::read(path) else { continue };
-        let n = ttf_parser::fonts_in_collection(&data).unwrap_or(1);
-        // 日本語用の書体（名前にJP/Japaneseを含む）を優先
-        let mut best = None;
-        for i in 0..n {
-            let Ok(face) = ttf_parser::Face::parse(&data, i) else { continue };
-            if face.glyph_index('あ').is_none() || matches!(face.permissions(), Some(ttf_parser::Permissions::Restricted)) || !face.is_subsetting_allowed() { continue; }
-            let jp = face.names().into_iter().any(|nm| nm.to_string().map(|s| s.contains("JP") || s.contains("Japanese")).unwrap_or(false));
-            if best.is_none() || jp { best = Some(i); }
-            if jp { break; }
-        }
-        if let Some(i) = best { return Some((data, i, util::display_name(&path.to_string_lossy()))); }
-    }
-    None
 }
 
 /// 幅に収まるよう折り返す（改行は保持）
@@ -293,8 +275,8 @@ fn draw_cover(c: &mut Content, f: &mut TextFont, cover: &serde_json::Value) {
 }
 
 pub fn export_ledger_pdf(project: &Project, ledger_uuid: &str, dest: &Path, cancel: &Cancel, progress: ProgressFn) -> Result<PdfReport> {
-    let font_data = load_font(&default_font_candidates());
-    let mut font = font_data.as_ref().and_then(|(d, i, n)| TextFont::embedded(d, *i, n.clone())).unwrap_or_else(TextFont::builtin);
+    // 同梱フォントを必ず使う（端末のフォントの有無で結果を変えない）
+    let mut font = TextFont::embedded(BUNDLED_FONT, 0, BUNDLED_FONT_NAME.into()).ok_or_else(|| AppError::internal("bundled font unavailable"))?;
     let detail = ledger::detail(&project.conn, ledger_uuid)?;
     let photo_ids: Vec<String> = detail.pages.iter().flat_map(|p| p.slots.iter().filter_map(|s| s.photo_uuid.clone())).collect();
     let rows = photos::list_photos(&project.conn, &PhotoFilter { uuids: Some(photo_ids.clone()), ..Default::default() })?;
@@ -392,6 +374,10 @@ pub fn export_ledger_pdf(project: &Project, ledger_uuid: &str, dest: &Path, canc
             let img_res = if xobjs.is_empty() { String::new() } else { format!("/XObject <<{xobjs} >>") };
             write_page(&mut pdf, c, img_res)?;
             done += 1;
+        }
+        if !font.missing.is_empty() {
+            let list: String = font.missing.iter().take(20).collect::<Vec<_>>().iter().map(|c| format!("「{c}」")).collect();
+            warnings.push(PdfWarning { page: 0, slot: 0, message: format!("印刷できない文字が{}種類あり、「〓」で表示しています：{list}", font.missing.len()) });
         }
         font.write(&mut pdf, font_id, cid, desc)?;
         let kids: String = page_ids.iter().map(|i| format!("{i} 0 R ")).collect();

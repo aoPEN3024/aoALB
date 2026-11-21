@@ -10,7 +10,12 @@ fn main() {
     let out = PathBuf::from(std::env::args().nth(1).unwrap_or_else(|| "demo-out".into()));
     let _ = std::fs::remove_dir_all(&out);
     std::fs::create_dir_all(out.join("src")).unwrap();
-    let mut p = project::create_project(&out, &NewProject { name: "架空 橋梁塗装工事".into(), kouji_code: "K-1".into(), contractor: "架空建設株式会社".into() }, "demo").unwrap();
+    let mut p = project::create_project(
+        &out,
+        &NewProject { name: "架空 橋梁塗装工事".into(), kouji_code: "K-1".into(), contractor: "架空建設株式会社".into() },
+        "demo",
+    )
+    .unwrap();
     synth::aopic_zip(&out.join("src/aopic.zip"), 3);
     photos::import(&mut p, &ImportSource::Zip { path: out.join("src/aopic.zip") }, ImportOptions::default(), &Cancel::new(), &mut |_| {}).unwrap();
     let mut files = vec![];
@@ -27,8 +32,18 @@ fn main() {
     let s = r.detail.pages[1].slots[0].uuid.clone();
     let mut f = serde_json::Map::new();
     f.insert("body".into(), serde_json::json!("下塗り完了状況。\n膜厚測定：規定値以上を確認。ABC-123 半角混在テスト。髙﨑①㈱"));
-    ledger::apply_ops(&mut p, &l.uuid, &[Op::InsertBlank { slot: s }, Op::SetCaption { photo: ids[3].clone(), fields: f },
-        Op::SetCover { cover: serde_json::json!({"title": "工事写真帳", "koushu": "塗装工", "project": "架空 橋梁塗装工事", "contractor": "架空建設株式会社"}) }]).unwrap();
+    ledger::apply_ops(
+        &mut p,
+        &l.uuid,
+        &[
+            Op::InsertBlank { slot: s },
+            Op::SetCaption { photo: ids[3].clone(), fields: f },
+            Op::SetCover {
+                cover: serde_json::json!({"title": "工事写真帳", "koushu": "塗装工", "project": "架空 橋梁塗装工事", "contractor": "架空建設株式会社"}),
+            },
+        ],
+    )
+    .unwrap();
     let r = pdf::export_ledger_pdf(&p, &l.uuid, &out.join("ledger.pdf"), &Cancel::new(), &mut |_| {}).unwrap();
     println!("{}", serde_json::to_string_pretty(&r).unwrap());
 }

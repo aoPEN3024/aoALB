@@ -9,11 +9,15 @@ pub fn jpeg(w: u32, h: u32, seed: u32, quality: u8) -> Vec<u8> {
     let mut img = image::RgbImage::new(w, h);
     let (a, b, c) = ((seed * 37) % 255, (seed * 91) % 255, (seed * 53) % 255);
     for (x, y, p) in img.enumerate_pixels_mut() {
-        let band = ((x / 40 + y / 40 + seed) % 2) as u32 * 60;
+        let band = ((x / 40 + y / 40 + seed) % 2) * 60;
         *p = image::Rgb([((x * 255 / w.max(1) + a) % 256) as u8, ((y * 255 / h.max(1) + b) % 256) as u8, ((band + c) % 256) as u8]);
     }
     // 向き確認用の目印（左上に白い四角）
-    for y in 0..(h / 8) { for x in 0..(w / 8) { img.put_pixel(x, y, image::Rgb([255, 255, 255])); } }
+    for y in 0..(h / 8) {
+        for x in 0..(w / 8) {
+            img.put_pixel(x, y, image::Rgb([255, 255, 255]));
+        }
+    }
     let mut out = Vec::new();
     image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, quality).encode_image(&img).unwrap();
     out
@@ -24,11 +28,17 @@ pub fn noisy_jpeg(w: u32, h: u32, seed: u32) -> Vec<u8> {
     let mut img = image::RgbImage::new(w, h);
     let mut x: u32 = seed.wrapping_mul(2654435761).max(1);
     for (px, py, p) in img.enumerate_pixels_mut() {
-        x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
         let base = ((px / 8 + py / 8 + seed) % 200) as u8;
         *p = image::Rgb([base.wrapping_add((x & 0x0F) as u8), base.wrapping_add(((x >> 8) & 0x0F) as u8), base.wrapping_add(((x >> 16) & 0x0F) as u8)]);
     }
-    for y in 0..(h / 8) { for x in 0..(w / 8) { img.put_pixel(x, y, image::Rgb([255, 255, 255])); } }
+    for y in 0..(h / 8) {
+        for x in 0..(w / 8) {
+            img.put_pixel(x, y, image::Rgb([255, 255, 255]));
+        }
+    }
     let mut out = Vec::new();
     image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 88).encode_image(&img).unwrap();
     out
@@ -51,7 +61,10 @@ pub fn with_exif(jpeg: &[u8], datetime: Option<&str>, orientation: Option<u16>) 
     let mut tiff: Vec<u8> = b"II*\0".to_vec();
     tiff.extend_from_slice(&8u32.to_le_bytes());
     let entry = |t: &mut Vec<u8>, tag: u16, typ: u16, count: u32, val: u32| {
-        t.extend_from_slice(&tag.to_le_bytes()); t.extend_from_slice(&typ.to_le_bytes()); t.extend_from_slice(&count.to_le_bytes()); t.extend_from_slice(&val.to_le_bytes());
+        t.extend_from_slice(&tag.to_le_bytes());
+        t.extend_from_slice(&typ.to_le_bytes());
+        t.extend_from_slice(&count.to_le_bytes());
+        t.extend_from_slice(&val.to_le_bytes());
     };
     tiff.extend_from_slice(&2u16.to_le_bytes());
     entry(&mut tiff, 0x0112, 3, 1, orientation.unwrap_or(1) as u32);
@@ -73,7 +86,10 @@ pub fn with_exif(jpeg: &[u8], datetime: Option<&str>, orientation: Option<u16>) 
     out
 }
 
-pub fn sha256(b: &[u8]) -> String { use sha2::Digest; hex::encode(sha2::Sha256::digest(b)) }
+pub fn sha256(b: &[u8]) -> String {
+    use sha2::Digest;
+    hex::encode(sha2::Sha256::digest(b))
+}
 
 /// aoPICの「aoALB連携ZIP」（manifestVersion 1）と同じ形式の架空ZIP
 pub fn aopic_zip(path: &Path, n: usize) -> Vec<(String, Vec<u8>)> {
@@ -99,7 +115,10 @@ pub fn aopic_zip(path: &Path, n: usize) -> Vec<(String, Vec<u8>)> {
     let opt = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
     zip.start_file("aoalb-export/manifest.json", opt).unwrap();
     zip.write_all(manifest.to_string().as_bytes()).unwrap();
-    for (uid, b) in &files { zip.start_file(format!("aoalb-export/photos/{uid}.jpg"), opt).unwrap(); zip.write_all(b).unwrap(); }
+    for (uid, b) in &files {
+        zip.start_file(format!("aoalb-export/photos/{uid}.jpg"), opt).unwrap();
+        zip.write_all(b).unwrap();
+    }
     zip.finish().unwrap();
     files
 }

@@ -2,7 +2,7 @@
 //! `PRAGMA user_version` でスキーマ版を管理し、古い版は順に上げる（下げない）。
 
 use crate::error::{AppError, Result};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use std::path::Path;
 
 pub const SCHEMA_VERSION: i64 = 1;

@@ -42,10 +42,18 @@ impl AppError {
         self.detail = detail.into();
         self
     }
-    pub fn invalid(message: impl Into<String>) -> Self { Self::new(ErrorKind::Invalid, message) }
-    pub fn not_found(message: impl Into<String>) -> Self { Self::new(ErrorKind::NotFound, message) }
-    pub fn corrupt(message: impl Into<String>) -> Self { Self::new(ErrorKind::Corrupt, message) }
-    pub fn cancelled() -> Self { Self::new(ErrorKind::Cancelled, "処理を中止しました。") }
+    pub fn invalid(message: impl Into<String>) -> Self {
+        Self::new(ErrorKind::Invalid, message)
+    }
+    pub fn not_found(message: impl Into<String>) -> Self {
+        Self::new(ErrorKind::NotFound, message)
+    }
+    pub fn corrupt(message: impl Into<String>) -> Self {
+        Self::new(ErrorKind::Corrupt, message)
+    }
+    pub fn cancelled() -> Self {
+        Self::new(ErrorKind::Cancelled, "処理を中止しました。")
+    }
     pub fn internal(detail: impl Into<String>) -> Self {
         Self::new(ErrorKind::Internal, "処理できませんでした。もう一度お試しください。").with_detail(detail)
     }
@@ -83,7 +91,9 @@ impl From<std::io::Error> for AppError {
 }
 
 impl From<serde_json::Error> for AppError {
-    fn from(e: serde_json::Error) -> Self { AppError::invalid("データの形式が正しくありません。").with_detail(format!("json: {e}")) }
+    fn from(e: serde_json::Error) -> Self {
+        AppError::invalid("データの形式が正しくありません。").with_detail(format!("json: {e}"))
+    }
 }
 
 impl From<zip::result::ZipError> for AppError {

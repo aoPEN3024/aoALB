@@ -23,3 +23,11 @@ while (-not $p.HasExited -and (Get-Date) -lt $deadline) {
   Start-Sleep -Milliseconds 500
 }
 if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force; throw "計測がタイムアウトしました" }
+# 合否：自動操作が最後まで成功し、サムネイルの読込み失敗がないこと
+$resultPath = Join-Path $Out "e2e-result.json"
+if (-not (Test-Path $resultPath)) { throw "自動操作の結果がありません（$resultPath）" }
+$r = Get-Content $resultPath -Raw -Encoding utf8 | ConvertFrom-Json
+if (-not $r.ok) { throw "自動操作が失敗しました：$($r.error)" }
+if ($r.thumbnailsLoaded.errors.Count -gt 0) { throw "サムネイルの読込みに失敗しました：$($r.thumbnailsLoaded.errors -join ', ')" }
+if ($p.ExitCode -ne 0) { throw "アプリが異常終了しました（終了コード $($p.ExitCode)）" }
+Write-Output "計測完了：$csv"

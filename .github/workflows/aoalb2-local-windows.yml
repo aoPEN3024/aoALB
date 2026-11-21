@@ -11,6 +11,10 @@
 # - Rust・Node・Tauri CLI は版を完全に固定（Linuxで検証済みの版）
 # - cargo は --locked（Cargo.lock の版から変えない）
 # - 使った版・Windows・WebView2 の版と計測条件を environment.json として Artifact に残す
+#
+# 成果物の合否分離：
+# - 利用者が試すインストーラーは全工程が合格した時だけ「aoalb2-windows-installer-passed」として保存
+# - 失敗時は「aoalb2-windows-diagnostics-FAILED」（インストーラーは含めない）にログ・計測途中結果を保存
 name: aoALB2 local - Windows build
 
 on:
@@ -48,6 +52,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master（toolchain で版を固定）
         with:
           toolchain: ${{ env.RUST_VERSION }}
+          components: rustfmt, clippy
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -55,10 +60,34 @@ jobs:
         with:
           workspaces: aoalb2-local
 
+      - name: 書式の確認（cargo fmt）
+        run: cargo fmt --check
+      - name: 静的検査（clippy）
+        run: cargo clippy --locked --all-targets -- -D warnings
       - name: 中核の自動検証
         run: cargo test --locked -p aoalb_core --release
-      - name: 画面ロジックの自動検証
-        run: node --test app/tests/ledger-model.test.mjs app/tests/leave-guard.test.mjs
+      - name: 画面JSの構文確認（全ファイル）
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP "jscheck"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $files = Get-ChildItem app/ui/js -Filter *.js
+          if ($files.Count -eq 0) { throw "app/ui/js に JS がありません" }
+          foreach ($f in $files) {
+            # ES modules として確認するため .mjs として写してから node --check
+            $m = Join-Path $dir ($f.BaseName + ".mjs")
+            Copy-Item $f.FullName $m
+            node --check $m
+            if ($LASTEXITCODE -ne 0) { throw "構文エラー：$($f.Name)" }
+          }
+          Write-Output "構文確認：$($files.Count) ファイル"
+      - name: 画面ロジックの自動検証（14件）
+        shell: pwsh
+        run: |
+          node --test --test-reporter=tap app/tests/ledger-model.test.mjs app/tests/leave-guard.test.mjs | Tee-Object -FilePath node-tests.tap
+          if ($LASTEXITCODE -ne 0) { throw "Nodeテストが失敗しました" }
+          $pass = (Select-String -Path node-tests.tap -Pattern '^# pass (\d+)').Matches.Groups[1].Value
+          if ([int]$pass -lt 14) { throw "Nodeテストの件数が不足しています（$pass 件）" }
 
       - name: 性能計測（3,000枚、計測用工事を残す）
         shell: pwsh
@@ -105,13 +134,30 @@ jobs:
             memorySampling = "0.5秒ごと。aoalb2-app.exe とその子孫（msedgewebview2.exe を含む）の WorkingSet64・PrivateMemorySize64 の合計"
           } | ConvertTo-Json | Out-File -Encoding utf8 measure-windows\environment.json
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: always()
+      # 合格品：全工程が成功した時だけ。インストーラーがなければ失敗にする
+      - name: 合格したインストーラーを保存
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: aoalb2-windows
+          name: aoalb2-windows-installer-passed
           retention-days: 7
-          if-no-files-found: warn
+          if-no-files-found: error
           path: |
             aoalb2-local/target/release/bundle/nsis/*.exe
             aoalb2-local/bench-windows.json
+            aoalb2-local/node-tests.tap
             aoalb2-local/measure-windows/
+
+      # 不合格時の診断用：インストーラーは含めない（不合格品を配布物と誤認しないため）
+      - name: 失敗時の診断情報を保存（インストーラーなし）
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: aoalb2-windows-diagnostics-FAILED
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            aoalb2-local/bench-windows.json
+            aoalb2-local/node-tests.tap
+            aoalb2-local/measure-windows/
+            aoalb2-local/target/release/bundle/nsis/*.log

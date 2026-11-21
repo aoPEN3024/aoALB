@@ -5,6 +5,8 @@
 
 - 設計書：[docs/design.md](docs/design.md)
 - 段階2（最小プロトタイプ）の結果：[docs/stage2-report.md](docs/stage2-report.md)
+- レビュー指摘への対応：[docs/review-2026-11-21.md](docs/review-2026-11-21.md)
+- 同梱フォントとライセンス：[core/fonts/](core/fonts/README.md)
 - 将来のクラウド対応案（主対象外）：[../docs/aoalb2/future-cloud/](../docs/aoalb2/future-cloud/README.md)
 
 ## 構成
@@ -30,6 +32,13 @@ cargo test -p aoalb_core
 AOALB2_HUGE_DIR=/tmp/huge cargo test --release -p aoalb_core --test integration -- --ignored huge_exchange_over_4gb
 # 性能計測（例：1,000枚）
 cargo run --release -p aoalb_core --bin aoalb-bench -- 1000 /tmp/bench
+# 4GB超の引継ぎの計測（時間・工程ごとの最大メモリ・容量）
+cargo run --release -p aoalb_core --example huge_exchange -- /tmp/huge
+# 実容量相当の写真での計測
+BENCH_REAL=1 cargo run --release -p aoalb_core --bin aoalb-bench -- 1000 /tmp/bench
+# アプリ全体（画面エンジン含む）のメモリ計測：計測用工事を残してから
+BENCH_KEEP=1 cargo run --release -p aoalb_core --bin aoalb-bench -- 3000 /tmp/b3000
+scripts/measure-app-memory.sh target/release/aoalb2-app /tmp/b3000/data/性能計測工事 /tmp/mem
 # 台帳PDFの見本（架空データ）
 cargo run --release -p aoalb_core --example demo_pdf -- /tmp/demo
 # 画面ロジックの検証
@@ -49,7 +58,7 @@ cargo tauri dev            # 開発起動
 cargo tauri build --bundles nsis   # インストーラー（target/release/bundle/nsis/）
 ```
 
-このブランチをGitHubへpushすると `.github/workflows/aoalb2-local-windows.yml` がWindows上で自動検証・計測・未署名インストーラー作成を行います（main・GitHub Pagesには影響しません）。
+このブランチをGitHubへpushすると `.github/workflows/aoalb2-local-windows.yml` がWindows上で自動検証・計測（WebView2を含むメモリ）・未署名インストーラー作成を行い、結果を Actions Artifact にだけ保存します（権限は contents: read のみ。Release・Pages・main・secrets には触れません）。
 
 ## 守っていること
 

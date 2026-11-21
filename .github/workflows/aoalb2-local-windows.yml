@@ -1,45 +1,76 @@
-# aoALB 2 ローカル版：Windowsで自動検証し、インストーラー（未署名）を作る。
-# このブランチへのpush時だけ動く。mainやGitHub Pagesには影響しない。
+# aoALB 2 ローカル版：Windowsで自動検証・性能計測（WebView2を含むアプリ全体のメモリ）を行い、
+# 未署名インストーラーを Actions Artifact としてだけ保存する。
+#
+# 影響範囲の限定：
+# - 動くのはこのブランチへのpushだけ（main・タグ・Pull Request・スケジュールでは動かない）
+# - 権限は contents: read のみ。Release作成・GitHub Pages・mainへの書込み・タグ作成はしない
+# - secrets（Supabase等の鍵を含む）は一切参照しない。外部サービスへは接続しない
+# - 外部のActionはコミットSHAで固定
 name: aoALB2 local - Windows build
 
 on:
   push:
     branches: [feature/aoalb2-local]
     paths: ["aoalb2-local/**", ".github/workflows/aoalb2-local-windows.yml"]
-  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: aoalb2-local-windows-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   windows:
     runs-on: windows-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: aoalb2-local
+    env:
+      CARGO_TERM_COLOR: never
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: aoalb2-local
+
       - name: 中核の自動検証
         run: cargo test -p aoalb_core --release
       - name: 画面ロジックの自動検証
         run: node --test app/tests/ledger-model.test.mjs
-      - name: 性能計測（1,000枚）
-        run: cargo run --release -p aoalb_core --bin aoalb-bench -- 1000 bench-work > bench-1000-windows.json
+
+      - name: 性能計測（3,000枚、計測用工事を残す）
+        shell: pwsh
+        run: |
+          $env:BENCH_KEEP = "1"
+          cargo run --release -p aoalb_core --bin aoalb-bench -- 3000 "$env:RUNNER_TEMP\bench3000" | Out-File -Encoding utf8 bench-3000-windows.json
+
       - name: Tauri CLI
         run: cargo install tauri-cli --version "^2" --locked
-      - name: インストーラー作成
+      - name: インストーラー作成（未署名・更新機能なし）
         working-directory: aoalb2-local/app/src-tauri
         run: cargo tauri build --bundles nsis
-      - uses: actions/upload-artifact@v4
+
+      - name: アプリ全体のメモリ計測（WebView2を含む、3,000枚・1,001ページ）
+        shell: pwsh
+        run: |
+          pwsh scripts/measure-app-memory.ps1 -App "target\release\aoalb2-app.exe" -Project "$env:RUNNER_TEMP\bench3000\data\性能計測工事" -Out "measure-windows"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: aoalb2-windows
+          retention-days: 7
+          if-no-files-found: error
           path: |
             aoalb2-local/target/release/bundle/nsis/*.exe
-            aoalb2-local/bench-1000-windows.json
+            aoalb2-local/bench-3000-windows.json
+            aoalb2-local/measure-windows/

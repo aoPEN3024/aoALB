@@ -160,6 +160,8 @@ export class MemoryRepository {
   }
   async ledgerDetail(id) { const l = this.ledgers.get(id); if (!l) throw err("台帳が見つかりません。", "not_found"); return clone(l); }
   async applyLedgerOps(id, ops) {
+    // 画面確認用：failSaves 回だけ一時的な保存失敗を起こす
+    if (this.failSaves > 0) { this.failSaves--; await new Promise(res => setTimeout(res, 5)); throw err("保存先に書き込めません。", "internal"); }
     const l = this.ledgers.get(id);
     if (l.deletedAt) throw err("ごみ箱の台帳は編集できません。先に復元してください。");
     const trashed = new Set(this.photos.filter(p => p.deletedAt).map(p => p.uuid));
@@ -179,6 +181,7 @@ export class MemoryRepository {
     this.ledgers.set(src.uuid, src);
     return clone(src);
   }
+  async pdfEstimate() { return { bytes: 0, pages: 0, images: 0, limit: 7e9, withinLimit: true, message: null }; }
   async exportPdf() { throw err("確認用の画面ではPDFを作成できません。Windowsアプリで作成してください。"); }
   async exchangePlan() { return { photos: this.photos.length, ledgers: this.ledgers.size, totalBytes: this.photos.reduce((n, p) => n + p.bytes, 0), freeBytes: null, suggestedName: "架空工事.aoalb" }; }
   async exportExchange() { throw err("確認用の画面では書き出せません。"); }
@@ -201,5 +204,5 @@ export class MemoryRepository {
   async reveal() {}
   async confirm(message) { return window.confirm(message); }
   onDropFiles() {}
-  onCloseRequested() {}
+  onCloseRequested(makeHandler) { this.exitHandler = makeHandler(async () => { this.destroyed = true; }); }
 }

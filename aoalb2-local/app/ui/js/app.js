@@ -5,6 +5,7 @@ import { applyLocal, computeInverse, isStructural, findSlot, orderedSlots, resol
 import { SaveQueue, SaveStatus } from "./save-queue.js";
 import { makeDraggable, onDrop } from "./pointer-drag.js";
 import { drawThumb, releaseCanvas } from "./thumb-loader.js";
+import { LeaveGuard, createExitHandler, describeOps } from "./leave-guard.js";
 
 const repo = createRepository();
 const FIELDS = ["koushu", "shubetsu", "saibetsu", "sokuten", "tekiyo"];
@@ -52,6 +53,19 @@ function modal(title, body, actions = []) {
   return close;
 }
 
+/** 保存に失敗した時の選択（再試行／編集画面へ戻る）。決まるまで先へ進まない */
+function askSaveFailure(err, count) {
+  return new Promise(resolve => {
+    modal("保存できていない変更があります", h("div", {},
+      h("p", { class: "warn strong" }, `台帳の変更${count}件を保存できていません。このままでは画面を移ったり閉じたりできません。`),
+      h("p", {}, `理由：${message(err)}`),
+      h("p", { class: "muted" }, "変更はこの画面に残っています。「再試行」で保存し直すか、「編集画面へ戻る」で作業を続けてください。")), [
+      { label: "再試行", primary: true, onClick: () => resolve("retry") },
+      { label: "編集画面へ戻る", onClick: () => resolve("stay") }]);
+  });
+}
+const guard = new LeaveGuard({ getQueue: () => state.ledger?.queue || null, askOnFailure: askSaveFailure });
+
 /** 進捗とキャンセルのある処理 */
 async function runTask(title, fn) {
   const taskId = crypto.randomUUID();
@@ -78,7 +92,8 @@ function header() {
 }
 
 async function go(screen, params = {}) {
-  if (state.ledger?.queue?.hasUnsaved) await state.ledger.queue.flush();
+  // 未保存の変更があれば、保存が成功するまで画面を移らない
+  if (!(await guard.ensureSaved())) return false;
   if (screen !== "editor") state.ledger = null;
   state.screen = screen;
   Object.assign(state, params);
@@ -165,8 +180,9 @@ function showRecovery(r) {
 }
 
 async function closeProject() {
-  if (state.ledger?.queue) { const ok = await state.ledger.queue.flush(); if (!ok && !(await repo.confirm("保存できていない変更があります。閉じると失われます。閉じますか？"))) return; }
-  try { await repo.closeProject(); } catch (e) { toast(message(e), "error"); }
+  // 保存に失敗したら工事を閉じない（変更を失わない）
+  if (!(await guard.ensureSaved())) return;
+  try { await repo.closeProject(); } catch (e) { toast(message(e), "error"); return; }
   state.project = null; state.info = null; go("home");
 }
 
@@ -433,6 +449,11 @@ async function renderLedgers(main) {
 
 async function pdfFlow(ledgerUuid, print) {
   try {
+    const est = await repo.pdfEstimate?.(ledgerUuid);
+    if (est && !est.withinLimit) {
+      modal("PDFを作成できません", h("div", {}, h("p", {}, est.message), h("p", { class: "muted" }, `推定 ${fmtBytes(est.bytes)}・${est.pages}ページ・写真${est.images}枚`)), [{ label: "閉じる", primary: true }]);
+      return;
+    }
     let dest = null;
     if (!print) {
       const d = await repo.ledgerDetail(ledgerUuid);
@@ -476,7 +497,14 @@ async function renderEditor(main) {
       if (!morePending) { L.detail = result.detail; draw(); }
       if (result.skippedPhotos?.length) toast(`${result.skippedPhotos.length}枚はこの台帳に配置済みのため飛ばしました。`);
     },
-    onRejected: (e) => { toast(`保存できませんでした：${message(e)}`, "error"); L.detail = clone(L.confirmed); draw(); },
+    onRejected: (e, ops) => {
+      // 再試行しても直らない失敗：画面を保存済みの状態へ戻し、どの操作をなぜ戻したかを示す
+      L.detail = clone(L.confirmed); draw();
+      modal("保存できなかった操作を取り消しました", h("div", {},
+        h("p", {}, `理由：${message(e)}`),
+        h("p", {}, "取り消した操作："), h("ul", {}, ...describeOps(ops).map(t => h("li", {}, t))),
+        h("p", { class: "muted" }, "画面は最後に保存できた状態に戻っています。")), [{ label: "閉じる", primary: true }]);
+    },
   });
   showStatus(SaveStatus.saved);
 
@@ -547,8 +575,8 @@ async function renderEditor(main) {
       h("button", { onclick: undo, title: "Ctrl+Z" }, "元に戻す"), h("button", { onclick: redo, title: "Ctrl+Y" }, "やり直す"),
       h("button", { onclick: () => exec([{ op: "AddPage", page: crypto.randomUUID(), after: currentPage() }]) }, "＋ページ"),
       h("button", { onclick: () => exec([{ op: "AddPage", page: crypto.randomUUID(), after: currentPage(), blank: true }]) }, "＋空白ページ"),
-      h("button", { onclick: async () => { await L.queue.flush(); pdfFlow(uuid, false); } }, "PDF"),
-      h("button", { onclick: async () => { await L.queue.flush(); pdfFlow(uuid, true); } }, "印刷")),
+      h("button", { onclick: async () => { if (await guard.ensureSaved()) pdfFlow(uuid, false); } }, "PDF"),
+      h("button", { onclick: async () => { if (await guard.ensureSaved()) pdfFlow(uuid, true); } }, "印刷")),
     pagesHost);
   // 右：設定
   const right = h("aside", { class: "ed-right" });
@@ -740,7 +768,7 @@ async function renderExchange(main) {
         const dest = await repo.pickSaveFile(plan.suggestedName, "aoalb", "引継ぎファイル");
         if (!dest) return;
         try {
-          if (state.ledger?.queue) await state.ledger.queue.flush();
+          if (!(await guard.ensureSaved())) return;
           const r = await runTask("引継ぎファイルを書き出しています", id => repo.exportExchange(id, dest));
           modal("書き出しました", h("div", {}, h("p", {}, `写真${r.photos}枚・${fmtBytes(r.bytes)}`), h("p", {}, "書き出した内容を読み直して、壊れていないことを確認しました。")),
             [{ label: "保存先を開く", onClick: () => repo.reveal(r.path) }, { label: "閉じる", primary: true }]);
@@ -773,7 +801,7 @@ async function importExchangeFlow(destParent) {
     h("p", { class: "muted" }, "置き換える場合、今の工事フォルダは名前を変えてそのまま残し、バックアップも作ります。")), [
     { label: "既存工事をバックアップして置き換える", danger: ex.localNewer, primary: !ex.localNewer, onClick: async () => {
       if (ex.localNewer && !(await repo.confirm(`${ex.message}\n\n置き換えますか？`))) return false;
-      if (state.project?.root === ex.root) { if (state.ledger?.queue) await state.ledger.queue.flush(); await repo.closeProject(); state.project = null; }
+      if (state.project?.root === ex.root) { if (!(await guard.ensureSaved())) return false; await repo.closeProject(); state.project = null; }
       run({ mode: "replace", root: ex.root, confirmNewer: ex.localNewer });
     } },
     { label: "別の工事として取り込む", onClick: () => run({ mode: "asCopy" }) },
@@ -796,7 +824,7 @@ async function renderBackup(main) {
           h("button", { class: "danger", onclick: async () => {
             if (!(await repo.confirm(`${b.createdAt} の状態へ戻します。今の状態は自動でバックアップしてから戻します。よろしいですか？`))) return;
             try {
-              if (state.ledger?.queue) await state.ledger.queue.flush();
+              if (!(await guard.ensureSaved())) return;
               const r = await repo.restoreBackup(b.name);
               toast("復元しました。");
               if (r?.recovery?.found) showRecovery(r.recovery);
@@ -822,11 +850,16 @@ repo.onDropFiles?.(paths => {
   if (paths.length === 1 && !/\.(jpe?g)$/i.test(paths[0])) return doImport({ kind: "folder", path: paths[0] });
   doImport({ kind: "files", paths });
 });
-repo.onCloseRequested?.(async () => {
-  try { if (state.ledger?.queue) await state.ledger.queue.flush(); if (state.project) await repo.closeProject(); } catch { /* 終了は続ける */ }
-});
+// アプリ終了：保存が成功し、工事を正常に閉じた後だけウィンドウを破棄する。失敗したら終了しない
+repo.onCloseRequested?.(destroy => createExitHandler({
+  guard,
+  closeProject: async () => { if (state.project) { await repo.closeProject(); state.project = null; } },
+  destroy,
+  onError: e => toast(`終了できませんでした：${message(e)}`, "error"),
+}));
 setInterval(() => { if (state.project) repo.periodicBackup().catch(() => {}); }, 10 * 60 * 1000);
-window.addEventListener("beforeunload", e => { if (state.ledger?.queue?.hasUnsaved) { state.ledger.queue.flush(); e.preventDefault(); } });
+// ブラウザの再読込み等：非同期の保存は完了を保証できないため頼らず、未保存がある時は止めて確認だけ出す
+window.addEventListener("beforeunload", e => { if (state.ledger?.queue?.hasUnsaved) { e.preventDefault(); e.returnValue = ""; } });
 window.__aoalb = { state, repo, go, opened }; // 動作確認用
 render();
 // 計測用の自動操作（アプリ起動時に環境変数で指定した時だけ）

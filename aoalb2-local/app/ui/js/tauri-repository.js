@@ -46,6 +46,7 @@ export class TauriRepository {
   restoreLedger(uuid) { return call("ledger_restore", { uuid }); }
   purgeLedger(uuid) { return call("ledger_purge", { uuid }); }
   duplicateLedger(uuid, title) { return call("ledger_duplicate", { uuid, title }); }
+  pdfEstimate(ledgerUuid) { return call("pdf_estimate", { ledgerUuid }); }
   exportPdf(taskId, ledgerUuid, dest = null, open = false) { return call("pdf_export", { taskId, ledgerUuid, dest, open }); }
 
   // ---- 引継ぎ
@@ -81,8 +82,10 @@ export class TauriRepository {
     const wv = T().webview?.getCurrentWebview?.();
     return wv?.onDragDropEvent?.(e => { if (e.payload.type === "drop") cb(e.payload.paths); });
   }
-  onCloseRequested(cb) {
+  /** 閉じる要求を受けたら必ず止め、makeHandler が作った処理が成功した時だけウィンドウを破棄する */
+  onCloseRequested(makeHandler) {
     const w = T().window.getCurrentWindow();
-    return w.onCloseRequested(async e => { e.preventDefault(); await cb(); await w.destroy(); });
+    const handler = makeHandler(() => w.destroy());
+    return w.onCloseRequested(e => { e.preventDefault(); handler(); });
   }
 }

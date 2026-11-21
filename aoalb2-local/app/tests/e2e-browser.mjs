@@ -79,12 +79,12 @@ await drag(leftCard, emptySlot);
 await page.waitForFunction(() => document.querySelectorAll(".slot.photo").length >= 5, null, { timeout: 5000 }).catch(async () => { await page.screenshot({ path: "/tmp/dragfail.png" }); throw new Error("drag failed"); });
 results.dragPlaceMs = Date.now() - tDrop;
 // 配置済み同士の入替え（ドラッグ）
-const before = await page.$$eval(".slot.photo img", ims => ims.map(i => i.src.slice(-30)));
+const before = await page.$$eval(".slot.photo", els => els.map(e => e.dataset.photo));
 const tSwap = Date.now();
 await drag(page.locator(".slot.photo").nth(0), page.locator(".slot.photo").nth(2));
 await page.waitForTimeout(50);
 results.swapReflectMs = Date.now() - tSwap;
-const after = await page.$$eval(".slot.photo img", ims => ims.map(i => i.src.slice(-30)));
+const after = await page.$$eval(".slot.photo", els => els.map(e => e.dataset.photo));
 results.swapped = before[0] === after[2] && before[2] === after[0];
 results.statusDuringSave = await page.locator("#save-status").textContent();
 await page.waitForTimeout(1200);

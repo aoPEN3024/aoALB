@@ -4,6 +4,7 @@ import { VirtualGrid } from "./virtual-grid.js";
 import { applyLocal, computeInverse, isStructural, findSlot, orderedSlots, resolvedCaption, captionLengthLevel, CAPTION_LIMITS, clone } from "./ledger-model.js";
 import { SaveQueue, SaveStatus } from "./save-queue.js";
 import { makeDraggable, onDrop } from "./pointer-drag.js";
+import { drawThumb, releaseCanvas } from "./thumb-loader.js";
 
 const repo = createRepository();
 const FIELDS = ["koushu", "shubetsu", "saibetsu", "sokuten", "tekiyo"];
@@ -113,10 +114,19 @@ async function renderHome(main) {
         h("button", { class: "primary", onclick: async () => { const p = await repo.pickFolder("工事フォルダを選ぶ"); if (p) openRoot(p); } }, "工事フォルダを選んで開く"),
         h("button", { onclick: () => importExchangeFlow(parent) }, "別端末の引継ぎファイルから取り込む"),
         h("h3", {}, "最近の工事"),
+        h("button", { class: "link", onclick: showAbout }, "このアプリについて（フォントのライセンス）"),
         info.recent.length ? h("ul", { class: "recent" }, ...info.recent.map(r => h("li", {},
           h("button", { class: "link", disabled: !r.exists, onclick: () => openRoot(r.root) }, r.name),
           h("span", { class: "muted" }, r.exists ? ` ${fmtDate(r.openedAt)}` : "（フォルダが見つかりません。移動した場合は「工事フォルダを選んで開く」から開いてください）")))) : h("p", { class: "muted" }, "まだありません。"))));
   if (repo.kind === "demo" && !state.project) { await opened(await repo.openProject()); }
+}
+
+async function showAbout() {
+  const a = await repo.about();
+  modal("このアプリについて", h("div", {},
+    h("p", {}, `aoALB 2 ローカル版 ${a.version}`),
+    h("p", {}, `PDFの文字には「${a.font}」を使い、使った文字だけをPDFへ埋め込んでいます。`),
+    h("pre", { class: "license" }, a.fontLicense)), [{ label: "閉じる", primary: true }]);
 }
 
 async function openRoot(root) { try { await opened(await repo.openProject(root)); } catch (e) { toast(message(e), "error"); } }
@@ -131,7 +141,27 @@ async function opened(s) {
     if (r.missingThumbnails) lines.push(`一覧用の小さい画像${r.missingThumbnails}枚を作り直しています。`);
     modal("工事データの確認", h("div", {}, ...lines.map(l => h("p", {}, l))), [{ label: "閉じる", primary: true }]);
   }
+  if (r?.unregisteredOriginals) offerRecovery(r.unregisteredOriginals);
   go("photos");
+}
+
+/** 一覧に登録されていない原寸写真を、一覧へ戻す（バックアップの記録があれば分類なども戻す） */
+function offerRecovery(n) {
+  modal("一覧にない写真があります", h("div", {},
+    h("p", {}, `工事フォルダに、写真一覧に入っていない写真が${n}枚あります。`),
+    h("p", { class: "muted" }, "古いバックアップへ戻した場合や、取込みの途中で終了した場合に起こります。写真のファイルは残っています。一覧へ戻すと、バックアップに記録があれば分類やaoPICの情報も戻します。")), [
+    { label: "一覧へ戻す", primary: true, onClick: async () => {
+      try { const r = await repo.recoverUnregistered(); showRecovery(r); render(); } catch (e) { toast(message(e), "error"); }
+    } },
+    { label: "あとで" }]);
+}
+function showRecovery(r) {
+  if (!r?.found) return;
+  const ok = r.recoveredFromBackup + r.recoveredFromFile;
+  modal("写真を一覧へ戻しました", h("div", {},
+    h("p", {}, `一覧へ戻した写真：${ok}枚`),
+    r.recoveredFromFile ? h("p", { class: "muted" }, `うち${r.recoveredFromFile}枚は記録が見つからなかったため、撮影日時などを写真から読み取り「復旧した写真」として戻しました（分類は未分類）。`) : null,
+    r.failed.length ? h("p", { class: "warn" }, `${r.failed.length}枚は写真として読み取れませんでした。ファイルは削除せず工事フォルダに残しています。`) : null), [{ label: "閉じる", primary: true }]);
 }
 
 async function closeProject() {
@@ -302,12 +332,21 @@ async function renderPhotos(main) {
 function nextDay(d) { const x = new Date(`${d}T00:00:00`); x.setDate(x.getDate() + 1); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`; }
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
+/** サムネイル用canvas。DOMから外れたら読み込みを中止し画素を解放する */
+function thumbCanvas(url) {
+  const c = h("canvas", { class: "thumb-canvas", width: 1, height: 1 });
+  requestAnimationFrame(() => { if (c.isConnected) c._cancel = drawThumb(c, url); });
+  return c;
+}
+export function releaseThumbs(root) { root.querySelectorAll("canvas.thumb-canvas").forEach(c => { c._cancel?.(); releaseCanvas(c); }); }
+window.__releaseThumbs = releaseThumbs;
+
 function photoCard(el, p, index, onChange, { draggable = false, compact = false } = {}) {
   const selected = state.selection.has(p.uuid);
   el.className = `vgrid-cell photo-card${selected ? " selected" : ""}${p.placed ? " placed" : ""}`;
   el.setAttribute("aria-selected", selected ? "true" : "false");
   const url = repo.thumbUrl(p);
-  const img = url ? h("img", { src: url, alt: "", loading: "lazy", decoding: "async", draggable: false }) : h("div", { class: "thumb-wait" }, p.thumbState === "failed" ? "表示できません" : "準備中");
+  const img = url ? thumbCanvas(url) : h("div", { class: "thumb-wait" }, p.thumbState === "failed" ? "表示できません" : "準備中");
   const c = p.classification;
   el.append(h("div", { class: "thumb" }, img, selected ? h("span", { class: "check-mark" }, "✓") : null, p.sourceKind === "aopic" ? h("span", { class: "badge" }, "aoPIC") : null,
     p.placed ? h("span", { class: "badge placed" }, "配置済") : null),
@@ -539,7 +578,13 @@ async function renderEditor(main) {
   };
 
   // ページを表示範囲だけ描画する
-  const io = new IntersectionObserver(entries => { for (const e of entries) if (e.isIntersecting) drawPage(e.target); }, { root: pagesHost, rootMargin: "800px 0px" });
+  // 見えているページ（前後約1ページ）だけ描画し、離れたページは画像ごと解放する（1,000ページでもメモリを増やさない）
+  const io = new IntersectionObserver(entries => {
+    for (const e of entries) {
+      if (e.isIntersecting) drawPage(e.target);
+      else if (e.target.childElementCount) { releaseThumbs(e.target); e.target.replaceChildren(); pageSig.delete(e.target.dataset.page); }
+    }
+  }, { root: pagesHost, rootMargin: "800px 0px" });
   // 変更のあったページだけ描き直す（ページ構成が変わった時だけ全体を作り直す）
   let layoutSig = "";
   const pageSig = new Map();
@@ -572,6 +617,7 @@ async function renderEditor(main) {
   function drawPage(frame) {
     const p = L.detail.pages.find(x => x.uuid === frame.dataset.page);
     if (!p) return;
+    releaseThumbs(frame);
     const i = L.detail.pages.indexOf(p);
     pageSig.set(p.uuid, sigOf(p));
     const page = h("div", { class: `page ${p.kind}` });
@@ -589,10 +635,11 @@ async function renderEditor(main) {
     const photo = s.photoUuid ? photosById.get(s.photoUuid) : null;
     const el = h("div", { class: `slot ${s.kind}${L.selectedSlot === s.uuid ? " selected" : ""}`, tabindex: 0 });
     el.dataset.slot = s.uuid;
+    if (s.photoUuid) el.dataset.photo = s.photoUuid;
     const cell = h("div", { class: "slot-photo" });
     if (s.kind === "photo") {
       const url = photo && repo.thumbUrl(photo);
-      cell.append(url ? h("img", { src: url, alt: "", draggable: false, decoding: "async" }) : h("div", { class: "thumb-wait" }, "準備中"));
+      cell.append(url ? thumbCanvas(url) : h("div", { class: "thumb-wait" }, "準備中"));
       if (photo?.deletedAt) cell.append(h("div", { class: "slot-warn" }, "ごみ箱の写真です"));
     } else cell.append(h("div", { class: "slot-empty" }, s.kind === "blank" ? "空白" : "ここへ写真をドラッグ"));
     const c = photo ? resolvedCaption(L.detail, photo) : { koushu: "", sokuten: "", body: "" };
@@ -748,7 +795,13 @@ async function renderBackup(main) {
           h("button", { onclick: async () => { const r = await repo.verifyBackup(b.name); toast(r.message, r.ok ? "info" : "error"); } }, "確認"),
           h("button", { class: "danger", onclick: async () => {
             if (!(await repo.confirm(`${b.createdAt} の状態へ戻します。今の状態は自動でバックアップしてから戻します。よろしいですか？`))) return;
-            try { if (state.ledger?.queue) await state.ledger.queue.flush(); await repo.restoreBackup(b.name); toast("復元しました。"); render(); } catch (e) { toast(message(e), "error"); }
+            try {
+              if (state.ledger?.queue) await state.ledger.queue.flush();
+              const r = await repo.restoreBackup(b.name);
+              toast("復元しました。");
+              if (r?.recovery?.found) showRecovery(r.recovery);
+              render();
+            } catch (e) { toast(message(e), "error"); }
           } }, "この状態へ戻す"))))))));
 }
 
@@ -774,5 +827,7 @@ repo.onCloseRequested?.(async () => {
 });
 setInterval(() => { if (state.project) repo.periodicBackup().catch(() => {}); }, 10 * 60 * 1000);
 window.addEventListener("beforeunload", e => { if (state.ledger?.queue?.hasUnsaved) { state.ledger.queue.flush(); e.preventDefault(); } });
-window.__aoalb = { state, repo }; // 動作確認用
+window.__aoalb = { state, repo, go, opened }; // 動作確認用
 render();
+// 計測用の自動操作（アプリ起動時に環境変数で指定した時だけ）
+repo.e2eConfig?.().then(c => { if (c?.enabled) import("./e2e-auto.js").then(m => m.run(c.project)); }).catch(() => {});

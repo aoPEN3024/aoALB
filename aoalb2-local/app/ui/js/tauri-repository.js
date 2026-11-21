@@ -3,7 +3,6 @@
 
 const T = () => window.__TAURI__;
 const call = (cmd, args) => T().core.invoke(cmd, args);
-const sep = p => (p.includes("\\") ? "\\" : "/");
 
 export class TauriRepository {
   constructor() { this.kind = "local"; this.thumbDir = ""; this.originalDir = ""; }
@@ -27,8 +26,9 @@ export class TauriRepository {
   restorePhotos(uuids) { return call("photos_restore", { uuids }); }
   folderLabels() { return call("folder_labels"); }
   rebuildThumbnails() { return call("thumbnails_rebuild"); }
-  thumbUrl(photo) { return photo.thumbState === "ready" ? T().core.convertFileSrc(`${this.thumbDir}${sep(this.thumbDir)}${photo.uuid}.jpg`) : null; }
-  originalUrl(photo) { return T().core.convertFileSrc(`${this.originalDir}${sep(this.originalDir)}${photo.uuid}.jpg`); }
+  // 写真は専用の経路（今開いている工事の写真だけを返す・画面側に溜めない）で読む
+  thumbUrl(photo) { return photo.thumbState === "ready" ? T().core.convertFileSrc(`t/${photo.uuid}.jpg`, "aoimg").replace("%2F", "/") : null; }
+  originalUrl(photo) { return T().core.convertFileSrc(`o/${photo.uuid}.jpg`, "aoimg").replace("%2F", "/"); }
 
   // ---- 分類
   classify(photoUuids, changes) { return call("classify_apply", { photoUuids, changes }); }
@@ -60,6 +60,10 @@ export class TauriRepository {
   periodicBackup() { return call("backup_periodic"); }
   verifyBackup(name) { return call("backup_verify", { name }); }
   restoreBackup(name) { return call("backup_restore", { name }); }
+  recoverUnregistered() { return call("recover_unregistered"); }
+  about() { return call("about"); }
+  e2eConfig() { return call("e2e_config"); }
+  e2eReport(report) { return call("e2e_report", { report }); }
 
   // ---- 共通
   cancelTask(taskId) { return call("task_cancel", { taskId }); }

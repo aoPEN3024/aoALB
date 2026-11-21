@@ -140,3 +140,7 @@ dd { margin: 0; }
 body.dragging, body.dragging * { cursor: grabbing !important; user-select: none; }
 .photo-card, .slot.photo { touch-action: pan-y; }
 .ed-left.drop { box-shadow: inset 0 0 0 3px var(--ok); }
+.license { white-space: pre-wrap; font-size: 11px; max-height: 50vh; overflow: auto; background: #f7f9fb; padding: 10px; border-radius: 8px; }
+
+.thumb-canvas { width: 100%; height: 100%; display: block; }
+.slot-photo .thumb-canvas { position: absolute; inset: 0; }

@@ -188,7 +188,9 @@ export class MemoryRepository {
   async createBackup() { return null; }
   async periodicBackup() { return null; }
   async verifyBackup() { return { ok: true, message: "" }; }
-  async restoreBackup() { return null; }
+  async restoreBackup() { return { before: null, recovery: { found: 0, recoveredFromBackup: 0, recoveredFromFile: 0, failed: [] } }; }
+  async recoverUnregistered() { return { found: 0, recoveredFromBackup: 0, recoveredFromFile: 0, failed: [], otherFiles: 0 }; }
+  async about() { return { version: "demo", font: "BIZ UDゴシック（同梱）", fontLicense: "SIL Open Font License 1.1（Windowsアプリで全文を表示）" }; }
   async cancelTask() {}
   onProgress(cb) { this.progressCbs.push(cb); }
   onThumbnailsReady(cb) { this.thumbCbs.push(cb); }

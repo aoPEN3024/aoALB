@@ -8,12 +8,13 @@
     "withGlobalTauri": true,
     "windows": [{ "title": "aoALB 2 工事写真台帳", "width": 1440, "height": 900, "minWidth": 1024, "minHeight": 680 }],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'",
-      "assetProtocol": { "enable": true, "scope": [] }
+      "csp": "default-src 'self'; img-src 'self' aoimg: http://aoimg.localhost data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src ipc: http://ipc.localhost aoimg: http://aoimg.localhost",
+      "assetProtocol": { "enable": false }
     }
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": false,
     "targets": ["nsis"],
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/icon.ico"],
     "windows": { "webviewInstallMode": { "type": "downloadBootstrapper" } }

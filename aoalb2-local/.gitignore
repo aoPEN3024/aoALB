@@ -5,3 +5,6 @@ app/src-tauri/gen/
 *.aoalb
 bench-work/
 demo-out/
+app/ui/_thumbs
+measure-windows/
+bench-*.json

@@ -36,6 +36,8 @@ struct Inner {
 }
 
 struct AppState {
+    /// 画像配信用：今開いている工事フォルダ（画像の要求ごとにDBの鍵を取らないよう分けて持つ）
+    image_root: Mutex<Option<PathBuf>>,
     inner: Mutex<Inner>,
     tasks: Mutex<HashMap<String, Cancel>>,
     settings: Mutex<Settings>,
@@ -94,8 +96,7 @@ struct ProjectState { info: project::ProjectInfo, root: String, thumb_dir: Strin
 fn opened(app: &AppHandle, state: &State<AppState>, p: Project, report: Option<project::OpenReport>) -> Res<ProjectState> {
     let info = p.info()?;
     let root = p.root.clone();
-    // 開いた工事フォルダだけを画像表示の許可範囲に加える
-    let _ = app.asset_protocol_scope().allow_directory(&root, true);
+    *state.image_root.lock().unwrap() = Some(root.clone());
     let mut g = state.inner.lock().unwrap();
     if let Some(old) = g.project.take() { let _ = old.close(); }
     if let Some(s) = g.thumb_stop.take() { s.store(true, Ordering::SeqCst); }
@@ -141,6 +142,7 @@ fn project_open(app: AppHandle, state: State<AppState>, root: String) -> Res<Pro
 
 #[tauri::command]
 fn project_close(state: State<AppState>) -> Res<()> {
+    *state.image_root.lock().unwrap() = None;
     let mut g = state.inner.lock().unwrap();
     if let Some(s) = g.thumb_stop.take() { s.store(true, Ordering::SeqCst); }
     if let Some(p) = g.project.take() {
@@ -322,7 +324,31 @@ fn backup_periodic(state: State<AppState>) -> Res<Option<backup::BackupInfo>> { 
 #[tauri::command]
 fn backup_verify(state: State<AppState>, name: String) -> Res<backup::VerifyReport> { with_project(&state, |p| backup::verify(p, &name)) }
 #[tauri::command]
-fn backup_restore(state: State<AppState>, name: String) -> Res<backup::BackupInfo> { with_project(&state, |p| backup::restore(p, &name)) }
+fn backup_restore(state: State<AppState>, name: String) -> Res<backup::RestoreReport> { with_project(&state, |p| backup::restore(p, &name)) }
+#[tauri::command]
+fn recover_unregistered(state: State<AppState>) -> Res<aoalb_core::recover::RecoveryReport> { with_project(&state, |p| aoalb_core::recover::recover_unregistered(p, &Cancel::new())) }
+#[tauri::command]
+fn about() -> Value {
+    json!({"version": project::APP_VERSION, "font": pdf::BUNDLED_FONT_NAME, "fontLicense": pdf::BUNDLED_FONT_LICENSE})
+}
+
+/// 計測用の自動操作（環境変数 AOALB2_E2E_PROJECT と AOALB2_E2E_OUT を両方指定した時だけ有効。通常は何もしない）
+#[tauri::command]
+fn e2e_config() -> Value {
+    let project = std::env::var("AOALB2_E2E_PROJECT").ok();
+    let enabled = project.is_some() && std::env::var("AOALB2_E2E_OUT").is_ok();
+    json!({"enabled": enabled, "project": if enabled { project } else { None }})
+}
+
+#[tauri::command]
+fn e2e_report(app: AppHandle, report: Value) -> Res<()> {
+    let out = std::env::var("AOALB2_E2E_OUT").map_err(|_| AppError::invalid("計測用ではありません。"))?;
+    aoalb_core::util::write_atomic(Path::new(&out), &serde_json::to_vec_pretty(&report).unwrap_or_default())?;
+    let state: State<AppState> = app.state();
+    let _ = project_close(state);
+    app.exit(0);
+    Ok(())
+}
 
 #[tauri::command]
 fn task_cancel(state: State<AppState>, task_id: String) { if let Some(c) = state.tasks.lock().unwrap().get(&task_id) { c.cancel(); } }
@@ -333,9 +359,28 @@ fn reveal(app: AppHandle, path: String) {
     let _ = app.opener().reveal_item_in_dir(path);
 }
 
+/// 写真の配信：aoimg://localhost/t/{写真ID}（サムネイル）・/o/{写真ID}（原寸）。
+/// 今開いている工事の originals/・thumbnails/ にある「写真ID.jpg」だけを返す（他のファイルは読めない）。
+/// 画面側に画像を溜めないよう no-store を付ける。
+fn image_response(app: &AppHandle, path: &str) -> tauri::http::Response<Vec<u8>> {
+    let deny = |code: u16| tauri::http::Response::builder().status(code).body(Vec::new()).unwrap();
+    let path = path.trim_start_matches('/');
+    let Some((kind, rest)) = path.split_once('/') else { return deny(404) };
+    let id = rest.trim_end_matches(".jpg");
+    if !aoalb_core::util::is_uuid(id) { return deny(404); }
+    let dir = match kind { "t" => "thumbnails", "o" => "originals", _ => return deny(404) };
+    let state: State<AppState> = app.state();
+    let Some(root) = state.image_root.lock().unwrap().clone() else { return deny(404) };
+    match std::fs::read(root.join(dir).join(format!("{id}.jpg"))) {
+        Ok(bytes) => tauri::http::Response::builder().status(200).header("Content-Type", "image/jpeg").header("Cache-Control", "no-store").header("Access-Control-Allow-Origin", "*").body(bytes).unwrap(),
+        Err(_) => deny(404),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .register_uri_scheme_protocol("aoimg", |ctx, req| image_response(ctx.app_handle(), req.uri().path()))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
@@ -345,7 +390,7 @@ pub fn run() {
             let mut settings: Settings = std::fs::read(&settings_path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
             // 端末識別子（最終編集端末の記録用。個人情報は含めない）
             if settings.device_id.is_empty() { settings.device_id = format!("pc-{}", &uuid::Uuid::new_v4().simple().to_string()[..12]); }
-            let state = AppState { inner: Mutex::new(Inner { project: None, thumb_stop: None }), tasks: Mutex::new(HashMap::new()), settings: Mutex::new(settings), settings_path };
+            let state = AppState { image_root: Mutex::new(None), inner: Mutex::new(Inner { project: None, thumb_stop: None }), tasks: Mutex::new(HashMap::new()), settings: Mutex::new(settings), settings_path };
             save_settings(&state);
             app.manage(state);
             Ok(())
@@ -356,7 +401,7 @@ pub fn run() {
             classify_apply, classify_restore, classify_meta, template_save, template_delete,
             ledgers_list, ledger_create, ledger_detail, ledger_apply, ledger_trash, ledger_restore, ledger_purge, ledger_duplicate, pdf_export,
             exchange_plan, exchange_export, exchange_preview, exchange_import,
-            backup_status, backup_create, backup_periodic, backup_verify, backup_restore, task_cancel, reveal
+            backup_status, backup_create, backup_periodic, backup_verify, backup_restore, recover_unregistered, about, task_cancel, reveal, e2e_config, e2e_report
         ])
         .run(tauri::generate_context!())
         .expect("aoALB2 を起動できませんでした");

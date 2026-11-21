@@ -6,6 +6,7 @@
 - 設計書：[docs/design.md](docs/design.md)
 - 段階2（最小プロトタイプ）の結果：[docs/stage2-report.md](docs/stage2-report.md)
 - レビュー指摘への対応：[docs/review-2026-11-21.md](docs/review-2026-11-21.md)
+- Codex独立レビューへの対応：[docs/review-codex-2026-11-22.md](docs/review-codex-2026-11-22.md)
 - 同梱フォントとライセンス：[core/fonts/](core/fonts/README.md)
 - 将来のクラウド対応案（主対象外）：[../docs/aoalb2/future-cloud/](../docs/aoalb2/future-cloud/README.md)
 

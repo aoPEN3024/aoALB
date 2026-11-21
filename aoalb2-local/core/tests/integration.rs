@@ -6,28 +6,40 @@ use aoalb_core::ledger::{self, Op};
 use aoalb_core::photos::{self, ImportOptions, ImportSource, PhotoFilter};
 use aoalb_core::project::{self, NewProject, Project};
 use aoalb_core::util::{self, Cancel, Progress};
-use aoalb_core::{backup, db, pdf, synth, ErrorKind};
+use aoalb_core::{ErrorKind, backup, db, pdf, synth};
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
 const DEV: &str = "test-device-a";
-fn np(name: &str) -> NewProject { NewProject { name: name.into(), kouji_code: "K-1".into(), contractor: "架空建設".into() } }
-fn noop() -> impl FnMut(Progress) { |_| {} }
+fn np(name: &str) -> NewProject {
+    NewProject { name: name.into(), kouji_code: "K-1".into(), contractor: "架空建設".into() }
+}
+fn noop() -> impl FnMut(Progress) {
+    |_| {}
+}
 
 fn write_photos(dir: &Path, n: usize) -> Vec<PathBuf> {
     fs::create_dir_all(dir).unwrap();
     let base = synth::jpeg(800, 600, 3, 80);
-    (0..n).map(|i| {
-        let p = dir.join(format!("IMG_{i:04}.JPG"));
-        let b = synth::with_exif(&synth::with_comment(&base, &format!("g{i}")), Some(&format!("2026:10:{:02} 10:{:02}:00", 1 + i % 28, i % 60)), Some(if i % 5 == 0 { 6 } else { 1 }));
-        fs::write(&p, b).unwrap();
-        p
-    }).collect()
+    (0..n)
+        .map(|i| {
+            let p = dir.join(format!("IMG_{i:04}.JPG"));
+            let b = synth::with_exif(
+                &synth::with_comment(&base, &format!("g{i}")),
+                Some(&format!("2026:10:{:02} 10:{:02}:00", 1 + i % 28, i % 60)),
+                Some(if i % 5 == 0 { 6 } else { 1 }),
+            );
+            fs::write(&p, b).unwrap();
+            p
+        })
+        .collect()
 }
 
-fn new_project(tmp: &Path, name: &str) -> Project { project::create_project(&tmp.join("data"), &np(name), DEV).unwrap() }
+fn new_project(tmp: &Path, name: &str) -> Project {
+    project::create_project(&tmp.join("data"), &np(name), DEV).unwrap()
+}
 
 fn import_files(p: &mut Project, files: Vec<PathBuf>) -> photos::ImportResult {
     photos::import(p, &ImportSource::Files { paths: files }, ImportOptions::default(), &Cancel::new(), &mut noop()).unwrap()
@@ -35,7 +47,10 @@ fn import_files(p: &mut Project, files: Vec<PathBuf>) -> photos::ImportResult {
 
 fn originals_hashes(p: &Project) -> BTreeMap<String, String> {
     let mut m = BTreeMap::new();
-    for e in fs::read_dir(p.originals_dir()).unwrap() { let e = e.unwrap().path(); m.insert(e.file_name().unwrap().to_string_lossy().to_string(), synth::sha256(&fs::read(&e).unwrap())); }
+    for e in fs::read_dir(p.originals_dir()).unwrap() {
+        let e = e.unwrap().path();
+        m.insert(e.file_name().unwrap().to_string_lossy().to_string(), synth::sha256(&fs::read(&e).unwrap()));
+    }
     m
 }
 
@@ -46,7 +61,9 @@ fn migration_and_integrity() {
     let v: i64 = p.conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
     assert_eq!(v, db::SCHEMA_VERSION);
     assert!(db::integrity_ok(&p.conn).unwrap());
-    for d in ["originals", "thumbnails", "exports", "backups", "tmp"] { assert!(p.root.join(d).is_dir()); }
+    for d in ["originals", "thumbnails", "exports", "backups", "tmp"] {
+        assert!(p.root.join(d).is_dir());
+    }
 }
 
 #[test]
@@ -99,7 +116,9 @@ fn import_general_jpeg_keeps_original_bytes_and_detects_duplicates() {
     assert_eq!(r.failed, 2);
     // 原寸はバイト単位で同一
     let stored: Vec<String> = originals_hashes(&p).into_values().collect();
-    for h in &src_hashes { assert!(stored.contains(h)); }
+    for h in &src_hashes {
+        assert!(stored.contains(h));
+    }
     let list = photos::list_photos(&p.conn, &PhotoFilter::default()).unwrap();
     assert!(list.iter().all(|x| x.source_kind == "general" && x.classification.is_empty() && x.taken_at_source == "exif"));
     assert!(list.iter().any(|x| x.orientation == 6));
@@ -138,9 +157,14 @@ fn folder_and_zip_import_with_cancel() {
     {
         let mut z = zip::ZipWriter::new(fs::File::create(&zip_path).unwrap());
         let o = zip::write::SimpleFileOptions::default();
-        for i in 0..3 { z.start_file(format!("現場/日付{i}/p{i}.jpg"), o).unwrap(); z.write_all(&synth::with_comment(&synth::jpeg(320, 240, i, 70), &format!("z{i}"))).unwrap(); }
-        z.start_file("../evil.jpg", o).unwrap(); z.write_all(&synth::jpeg(10, 10, 1, 50)).unwrap();
-        z.start_file("readme.exe", o).unwrap(); z.write_all(b"MZ").unwrap();
+        for i in 0..3 {
+            z.start_file(format!("現場/日付{i}/p{i}.jpg"), o).unwrap();
+            z.write_all(&synth::with_comment(&synth::jpeg(320, 240, i, 70), &format!("z{i}"))).unwrap();
+        }
+        z.start_file("../evil.jpg", o).unwrap();
+        z.write_all(&synth::jpeg(10, 10, 1, 50)).unwrap();
+        z.start_file("readme.exe", o).unwrap();
+        z.write_all(b"MZ").unwrap();
         z.finish().unwrap();
     }
     let r = photos::import(&mut p, &ImportSource::Zip { path: zip_path }, ImportOptions::default(), &Cancel::new(), &mut noop()).unwrap();
@@ -195,7 +219,7 @@ fn aopic_zip_keeps_metadata_and_classification_override_is_reversible() {
     // 項目単位で元分類へ戻す
     let mut back = BTreeMap::new();
     back.insert("sokuten".to_string(), FieldChange::Original);
-    classify::apply(&mut p, &ids[..1].to_vec(), &back).unwrap();
+    classify::apply(&mut p, &ids[..1], &back).unwrap();
     let r0 = photos::list_photos(&p.conn, &PhotoFilter { uuids: Some(vec![ids[0].clone()]), ..Default::default() }).unwrap().remove(0);
     assert!(r0.classification.sokuten.starts_with('P'));
     assert_eq!(r0.overridden, vec!["shubetsu"]);
@@ -218,8 +242,12 @@ fn ledger_with_photos(t: &Path, n: usize) -> (Project, String, Vec<String>) {
     (p, l.uuid, ids)
 }
 
-fn slot_ids(d: &ledger::LedgerDetail) -> Vec<String> { d.pages.iter().flat_map(|p| p.slots.iter().map(|s| s.uuid.clone())).collect() }
-fn contents(d: &ledger::LedgerDetail) -> Vec<Option<String>> { d.pages.iter().flat_map(|p| p.slots.iter().map(|s| if s.kind == "blank" { Some("BLANK".into()) } else { s.photo_uuid.clone() })).collect() }
+fn slot_ids(d: &ledger::LedgerDetail) -> Vec<String> {
+    d.pages.iter().flat_map(|p| p.slots.iter().map(|s| s.uuid.clone())).collect()
+}
+fn contents(d: &ledger::LedgerDetail) -> Vec<Option<String>> {
+    d.pages.iter().flat_map(|p| p.slots.iter().map(|s| if s.kind == "blank" { Some("BLANK".into()) } else { s.photo_uuid.clone() })).collect()
+}
 
 #[test]
 fn ledger_place_swap_move_blank_pages_and_incremental_writes() {
@@ -278,8 +306,18 @@ fn ledger_place_swap_move_blank_pages_and_incremental_writes() {
     // 台帳名・文言・表紙
     let mut f = serde_json::Map::new();
     f.insert("body".into(), serde_json::json!("手入力の台帳文"));
-    let r = ledger::apply_ops(&mut p, &l, &[Op::SetTitle { title: "第1回 出来形".into() }, Op::SetCaption { photo: ids[2].clone(), fields: f },
-        Op::SetCover { cover: serde_json::json!({"title": "工事写真帳", "project": "架空工事", "contractor": "架空建設", "koushu": "塗装工"}) }]).unwrap();
+    let r = ledger::apply_ops(
+        &mut p,
+        &l,
+        &[
+            Op::SetTitle { title: "第1回 出来形".into() },
+            Op::SetCaption { photo: ids[2].clone(), fields: f },
+            Op::SetCover {
+                cover: serde_json::json!({"title": "工事写真帳", "project": "架空工事", "contractor": "架空建設", "koushu": "塗装工"})
+            },
+        ],
+    )
+    .unwrap();
     assert_eq!(r.detail.title, "第1回 出来形");
     assert_eq!(r.detail.captions[&ids[2]]["body"], "手入力の台帳文");
     // 長すぎる文言は拒否
@@ -310,7 +348,7 @@ fn ledger_trash_restore_purge_never_touch_photos() {
     assert_eq!(photos::list_photos(&p.conn, &PhotoFilter::default()).unwrap().len(), 4);
     assert_eq!(hashes, originals_hashes(&p));
     // 配置中の写真はごみ箱へ入れられない（複製台帳に配置中）
-    assert!(photos::trash_photos(&mut p, &ids[..1].to_vec()).is_err());
+    assert!(photos::trash_photos(&mut p, &ids[..1]).is_err());
 }
 
 #[test]
@@ -342,9 +380,15 @@ fn copy_dir(src: &Path, dst: &Path) {
     fs::create_dir_all(dst).unwrap();
     for e in fs::read_dir(src).unwrap() {
         let e = e.unwrap();
-        if e.file_name() == ".aoalb.lock" { continue; } // Windowsではロック中のファイルを読めない
+        if e.file_name() == ".aoalb.lock" {
+            continue;
+        } // Windowsではロック中のファイルを読めない
         let to = dst.join(e.file_name());
-        if e.file_type().unwrap().is_dir() { copy_dir(&e.path(), &to); } else { fs::copy(e.path(), to).unwrap(); }
+        if e.file_type().unwrap().is_dir() {
+            copy_dir(&e.path(), &to);
+        } else {
+            fs::copy(e.path(), to).unwrap();
+        }
     }
 }
 
@@ -359,7 +403,11 @@ fn thumbnails_are_separate_and_regenerable_with_orientation() {
     for r in &rows {
         let img = image::open(p.thumb_path(&r.uuid)).unwrap();
         // 800x600 の写真。Orientation=6 は縦向きに補正される
-        if r.orientation == 6 { assert_eq!((img.width(), img.height()), (360, 480)); } else { assert_eq!((img.width(), img.height()), (480, 360)); }
+        if r.orientation == 6 {
+            assert_eq!((img.width(), img.height()), (360, 480));
+        } else {
+            assert_eq!((img.width(), img.height()), (480, 360));
+        }
     }
     fs::remove_dir_all(p.thumbs_dir()).unwrap();
     fs::create_dir_all(p.thumbs_dir()).unwrap();
@@ -398,7 +446,8 @@ fn pdf_embeds_jpeg_without_recompression() {
     let orig = fs::read(p.original_path(&ids[3])).unwrap();
     assert!(bytes.windows(orig.len()).any(|w| w == orig.as_slice()));
     // キャンセル時は完成ファイルを作らない
-    let c = Cancel::new(); c.cancel();
+    let c = Cancel::new();
+    c.cancel();
     let out2 = p.root.join("exports").join("中止.pdf");
     assert!(pdf::export_ledger_pdf(&p, &l, &out2, &c, &mut noop()).is_err());
     assert!(!out2.exists());
@@ -416,7 +465,7 @@ fn exchange_round_trip_and_generation_warning() {
     ledger::apply_ops(&mut a, &l, &[Op::PlaceMany { from: s[0].clone(), photos: ids.clone() }]).unwrap();
     let mut ch = BTreeMap::new();
     ch.insert("koushu".to_string(), FieldChange::Set("足場工".into()));
-    classify::apply(&mut a, &ids[..2].to_vec(), &ch).unwrap();
+    classify::apply(&mut a, &ids[..2], &ch).unwrap();
     let file = t.path().join("受渡し").join("工事_20261121.aoalb");
     let rep = exchange::export(&mut a, &file, &Cancel::new(), &mut noop()).unwrap();
     assert!(rep.verified);
@@ -431,7 +480,10 @@ fn exchange_round_trip_and_generation_warning() {
     assert_eq!(contents(&la), contents(&lb));
     let pa = photos::list_photos(&a.conn, &PhotoFilter::default()).unwrap();
     let pb = photos::list_photos(&b.conn, &PhotoFilter::default()).unwrap();
-    assert_eq!(pa.iter().map(|x| (&x.uuid, &x.classification, &x.original, &x.photo_uid)).collect::<Vec<_>>(), pb.iter().map(|x| (&x.uuid, &x.classification, &x.original, &x.photo_uid)).collect::<Vec<_>>());
+    assert_eq!(
+        pa.iter().map(|x| (&x.uuid, &x.classification, &x.original, &x.photo_uid)).collect::<Vec<_>>(),
+        pb.iter().map(|x| (&x.uuid, &x.classification, &x.original, &x.photo_uid)).collect::<Vec<_>>()
+    );
     // 端末Bで編集して書き出し→端末Aへ置換で戻す（Aは未編集なので警告なし）
     ledger::apply_ops(&mut b, &l, &[Op::SetTitle { title: "端末Bで編集".into() }]).unwrap();
     let file_b = t.path().join("受渡し").join("工事_B.aoalb");
@@ -440,13 +492,23 @@ fn exchange_round_trip_and_generation_warning() {
     ledger::apply_ops(&mut a, &l, &[Op::SetTitle { title: "端末Aでも編集".into() }]).unwrap();
     let a_root = a.root.clone();
     a.close().unwrap();
-    let prev = exchange::preview(&file_b, &[a_root.clone()], t.path()).unwrap();
+    let prev = exchange::preview(&file_b, std::slice::from_ref(&a_root), t.path()).unwrap();
     assert!(prev.existing.as_ref().unwrap().local_newer);
-    let e = exchange::import(&file_b, t.path(), ImportMode::Replace { root: a_root.clone(), confirm_newer: false }, DEV, &Cancel::new(), &mut noop()).err().unwrap();
+    let e = exchange::import(&file_b, t.path(), ImportMode::Replace { root: a_root.clone(), confirm_newer: false }, DEV, &Cancel::new(), &mut noop())
+        .err()
+        .unwrap();
     assert_eq!(e.kind, ErrorKind::NeedsConfirmation);
     assert!(e.message.contains("この端末には、取込ファイルより新しい編集内容があります"));
     // 確認の上で置換：前の工事フォルダは退避され、DBバックアップも取られる
-    let r = exchange::import(&file_b, a_root.parent().unwrap(), ImportMode::Replace { root: a_root.clone(), confirm_newer: true }, DEV, &Cancel::new(), &mut noop()).unwrap();
+    let r = exchange::import(
+        &file_b,
+        a_root.parent().unwrap(),
+        ImportMode::Replace { root: a_root.clone(), confirm_newer: true },
+        DEV,
+        &Cancel::new(),
+        &mut noop(),
+    )
+    .unwrap();
     let prev_folder = PathBuf::from(r.previous_folder.unwrap());
     assert!(prev_folder.join("project.sqlite").exists());
     assert!(fs::read_dir(prev_folder.join("backups")).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().contains("before-import-replace")));
@@ -473,11 +535,22 @@ fn exchange_rejects_broken_and_malicious_archives_without_touching_existing() {
     assert!(exchange::import(&cut, &dest, ImportMode::New, DEV, &Cancel::new(), &mut noop()).is_err());
     // 写真の中身を書き換え（SHA-256不一致）
     let tampered = t.path().join("tampered.aoalb");
-    rewrite_zip(&file, &tampered, |name, data| if name.starts_with("originals/") { let mut d = data.to_vec(); let n = d.len(); d[n - 10] ^= 0xFF; Some((name.to_string(), d)) } else { Some((name.to_string(), data.to_vec())) });
+    rewrite_zip(&file, &tampered, |name, data| {
+        if name.starts_with("originals/") {
+            let mut d = data.to_vec();
+            let n = d.len();
+            d[n - 10] ^= 0xFF;
+            Some((name.to_string(), d))
+        } else {
+            Some((name.to_string(), data.to_vec()))
+        }
+    });
     let e = exchange::import(&tampered, &dest, ImportMode::New, DEV, &Cancel::new(), &mut noop()).err().unwrap();
     assert!(e.message.contains("壊れて"));
     // 不正なパス・HTML・実行ファイルを含む
-    for (bad, label) in [("../escape.jpg", "trav"), ("originals/../../x.jpg", "trav2"), ("index.html", "html"), ("tool.exe", "exe"), ("C:/Windows/x.jpg", "abs")] {
+    for (bad, label) in
+        [("../escape.jpg", "trav"), ("originals/../../x.jpg", "trav2"), ("index.html", "html"), ("tool.exe", "exe"), ("C:/Windows/x.jpg", "abs")]
+    {
         let f = t.path().join(format!("{label}.aoalb"));
         rewrite_zip(&file, &f, |name, data| Some((name.to_string(), data.to_vec())));
         append_entry(&f, bad);
@@ -485,16 +558,25 @@ fn exchange_rejects_broken_and_malicious_archives_without_touching_existing() {
     }
     // 新しい形式版は拒否
     let future = t.path().join("future.aoalb");
-    rewrite_zip(&file, &future, |name, data| if name == "manifest.json" { let s = String::from_utf8(data.to_vec()).unwrap().replace("\"formatVersion\": 1", "\"formatVersion\": 99"); Some((name.into(), s.into_bytes())) } else { Some((name.into(), data.to_vec())) });
+    rewrite_zip(&file, &future, |name, data| {
+        if name == "manifest.json" {
+            let s = String::from_utf8(data.to_vec()).unwrap().replace("\"formatVersion\": 1", "\"formatVersion\": 99");
+            Some((name.into(), s.into_bytes()))
+        } else {
+            Some((name.into(), data.to_vec()))
+        }
+    });
     assert!(exchange::import(&future, &dest, ImportMode::New, DEV, &Cancel::new(), &mut noop()).err().unwrap().message.contains("新しい版"));
     // 途中キャンセル
-    let c = Cancel::new(); c.cancel();
+    let c = Cancel::new();
+    c.cancel();
     assert!(exchange::import(&file, &dest, ImportMode::New, DEV, &c, &mut noop()).is_err());
     // どの失敗でも取込み先に工事フォルダ・作業フォルダを残さない
     assert_eq!(count(), 0);
     // 書出しのキャンセルでも完成ファイルを残さない
     let out = t.path().join("cancel.aoalb");
-    let c = Cancel::new(); c.cancel();
+    let c = Cancel::new();
+    c.cancel();
     assert!(exchange::export(&mut a, &out, &c, &mut noop()).is_err());
     assert!(!out.exists());
 }
@@ -507,7 +589,10 @@ fn rewrite_zip(src: &Path, dst: &Path, f: impl Fn(&str, &[u8]) -> Option<(String
         let name = e.name().unwrap().to_string();
         let mut data = Vec::new();
         std::io::Read::read_to_end(&mut e, &mut data).unwrap();
-        if let Some((n, d)) = f(&name, &data) { w.start_file(n, zip::write::SimpleFileOptions::default()).unwrap(); w.write_all(&d).unwrap(); }
+        if let Some((n, d)) = f(&name, &data) {
+            w.start_file(n, zip::write::SimpleFileOptions::default()).unwrap();
+            w.write_all(&d).unwrap();
+        }
     }
     w.finish().unwrap();
 }
@@ -579,22 +664,37 @@ fn backup_verify_restore() {
 fn no_network_code_and_no_secrets_in_sources() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let cargo = fs::read_to_string(root.join("core").join("Cargo.toml")).unwrap();
-    for net in ["reqwest", "hyper", "ureq", "supabase", "tokio-tungstenite"] { assert!(!cargo.contains(net), "network crate {net}"); }
+    for net in ["reqwest", "hyper", "ureq", "supabase", "tokio-tungstenite"] {
+        assert!(!cargo.contains(net), "network crate {net}");
+    }
     let mut stack = vec![root.to_path_buf()];
     while let Some(d) = stack.pop() {
         for e in fs::read_dir(&d).unwrap() {
             let p = e.unwrap().path();
             let n = p.file_name().unwrap().to_string_lossy().to_string();
-            if p.is_dir() { if !["target", "node_modules", "gen", ".git"].contains(&n.as_str()) { stack.push(p); } continue; }
-            if !["rs", "js", "html", "css", "json", "toml", "md"].iter().any(|x| n.ends_with(x)) { continue; }
+            if p.is_dir() {
+                if !["target", "node_modules", "gen", ".git"].contains(&n.as_str()) {
+                    stack.push(p);
+                }
+                continue;
+            }
+            if !["rs", "js", "html", "css", "json", "toml", "md"].iter().any(|x| n.ends_with(x)) {
+                continue;
+            }
             let s = fs::read_to_string(&p).unwrap_or_default();
-            for bad in [["service", "_role"].concat(), ["sb_", "secret_"].concat(), ["supabase", ".co"].concat(), ["BEGIN PRIVATE", " KEY"].concat(), ["eyJhbGci", "Oi"].concat()] {
-                let bad = bad.as_str(); assert!(!s.contains(bad), "{} contains {bad}", p.display());
+            for bad in [
+                ["service", "_role"].concat(),
+                ["sb_", "secret_"].concat(),
+                ["supabase", ".co"].concat(),
+                ["BEGIN PRIVATE", " KEY"].concat(),
+                ["eyJhbGci", "Oi"].concat(),
+            ] {
+                let bad = bad.as_str();
+                assert!(!s.contains(bad), "{} contains {bad}", p.display());
             }
         }
     }
 }
-
 
 /// 画面（app/ui）が送るJSONの形と中核の型が一致していることを固定する
 #[test]
@@ -613,11 +713,13 @@ fn ui_json_contract() {
     let src: ImportSource = serde_json::from_str(r#"{"kind":"files","paths":["a.jpg"]}"#).unwrap();
     assert!(matches!(src, ImportSource::Files { .. }));
     let _: ImportOptions = serde_json::from_str(r#"{"allowDuplicates":true}"#).unwrap();
-    let f: PhotoFilter = serde_json::from_str(r#"{"ledgerUuid":"l","unplacedOnly":true,"unclassifiedOnly":false,"text":"a","takenFrom":"2026-01-01","uuids":["x"]}"#).unwrap();
+    let f: PhotoFilter =
+        serde_json::from_str(r#"{"ledgerUuid":"l","unplacedOnly":true,"unclassifiedOnly":false,"text":"a","takenFrom":"2026-01-01","uuids":["x"]}"#).unwrap();
     assert!(f.unplaced_only);
     let ch: BTreeMap<String, FieldChange> = serde_json::from_str(r#"{"koushu":{"mode":"set","value":"塗装工"},"sokuten":{"mode":"original"}}"#).unwrap();
     assert_eq!(ch["sokuten"], FieldChange::Original);
-    let st: Vec<classify::OverrideState> = serde_json::from_str(r#"[{"photoUuid":"p","koushu":null,"shubetsu":"x","saibetsu":null,"sokuten":null,"tekiyo":null}]"#).unwrap();
+    let st: Vec<classify::OverrideState> =
+        serde_json::from_str(r#"[{"photoUuid":"p","koushu":null,"shubetsu":"x","saibetsu":null,"sokuten":null,"tekiyo":null}]"#).unwrap();
     assert_eq!(st[0].shubetsu.as_deref(), Some("x"));
     let np: NewProject = serde_json::from_str(r#"{"name":"工事","contractor":"x"}"#).unwrap();
     assert_eq!(np.name, "工事");
@@ -666,14 +768,20 @@ fn restore_old_backup_keeps_later_photos() {
     let zip = t.path().join("later.zip");
     synth::aopic_zip(&zip, 3);
     photos::import(&mut p, &ImportSource::Zip { path: zip }, ImportOptions::default(), &Cancel::new(), &mut noop()).unwrap();
-    let later_general = write_photos(&t.path().join("src2"), 2).into_iter().map(|f| { let b = synth::with_comment(&fs::read(&f).unwrap(), "later"); fs::write(&f, b).unwrap(); f }).collect();
+    let later_general = write_photos(&t.path().join("src2"), 2)
+        .into_iter()
+        .inspect(|f| {
+            let b = synth::with_comment(&fs::read(f).unwrap(), "later");
+            fs::write(f, b).unwrap();
+        })
+        .collect();
     import_files(&mut p, later_general);
     let all_before: Vec<_> = photos::list_photos(&p.conn, &PhotoFilter::default()).unwrap();
     assert_eq!(all_before.len(), 7);
     let later_ids: Vec<String> = all_before.iter().filter(|x| x.source_kind == "aopic").map(|x| x.uuid.clone()).collect();
     let mut ch = BTreeMap::new();
     ch.insert("shubetsu".to_string(), FieldChange::Set("変更後の種別".into()));
-    classify::apply(&mut p, &later_ids[..1].to_vec(), &ch).unwrap();
+    classify::apply(&mut p, &later_ids[..1], &ch).unwrap();
     let s0 = ledger::detail(&p.conn, &l.uuid).unwrap().pages[0].slots[0].uuid.clone();
     ledger::apply_ops(&mut p, &l.uuid, &[Op::Place { slot: s0, photo: later_ids[0].clone() }]).unwrap();
     // 古いバックアップへ復元
@@ -724,4 +832,212 @@ fn unregistered_originals_detect_and_recover_from_file() {
     assert_eq!(d.sha256, synth::sha256(&jpeg), "原寸はそのまま");
     assert!(p.original_path(&broken).exists() && p.originals_dir().join("memo.txt").exists(), "読めないファイルも削除しない");
     assert!(backup::list(&p).unwrap().iter().any(|b| b.reason == "before-recovery"));
+}
+
+/// Windowsの予約名・使えない文字・末尾のピリオドや空白・空文字・既存フォルダとの衝突
+#[test]
+fn windows_reserved_and_unsafe_folder_names() {
+    use aoalb_core::util::{is_reserved_windows_name, safe_name, unique_child};
+    for r in ["CON", "con", "Prn", "AUX", "nul", "COM1", "com9", "LPT1", "lpt9", "COM0", "CON.txt", "LPT9.工事", "nul.tar.gz", "CON .txt", "COM¹", "CONIN$"]
+    {
+        assert!(is_reserved_windows_name(r), "{r}");
+        let s = safe_name(r, "工事");
+        assert!(!is_reserved_windows_name(&s), "{r} -> {s}");
+    }
+    for ok in ["CONSOLE", "COM10", "LPT", "工事CON", "A.CON", "com1工事"] {
+        assert!(!is_reserved_windows_name(ok), "{ok}");
+    }
+    assert_eq!(safe_name("CON.txt", "x"), "CON_.txt");
+    assert_eq!(safe_name("lpt9", "x"), "lpt9_");
+    assert_eq!(safe_name("  工事名. . ", "x"), "工事名");
+    assert_eq!(safe_name("a<b>c:d\"e/f\\g|h?i*j\u{1}", "x"), "a_b_c_d_e_f_g_h_i_j_");
+    assert_eq!(safe_name("", "工事"), "工事");
+    assert_eq!(safe_name(" . . ", "工事"), "工事");
+    assert_eq!(safe_name("CON.", "工事"), "CON_");
+    assert_eq!(safe_name(&"長".repeat(200), "x").chars().count(), 80);
+    // 衝突（大文字小文字違いを含む）
+    let t = tempfile::tempdir().unwrap();
+    fs::create_dir(t.path().join("Abc")).unwrap();
+    fs::create_dir(t.path().join("abc (2)")).unwrap();
+    assert_eq!(unique_child(t.path(), "ABC").unwrap().file_name().unwrap(), "ABC (3)");
+    // 工事の新規作成と引継ぎ取込みが同じ規則で作られる
+    let p = project::create_project(&t.path().join("data"), &np("CON"), DEV).unwrap();
+    assert_eq!(p.root.file_name().unwrap(), "CON_");
+    let p2 = project::create_project(&t.path().join("data"), &np("con"), DEV).unwrap();
+    assert_eq!(p2.root.file_name().unwrap(), "con_ (2)");
+    let mut p3 = project::create_project(&t.path().join("data"), &np("LPT9.工事 . "), DEV).unwrap();
+    assert_eq!(p3.root.file_name().unwrap(), "LPT9_.工事");
+    let file = t.path().join("x.aoalb");
+    exchange::export(&mut p3, &file, &Cancel::new(), &mut noop()).unwrap();
+    fs::create_dir_all(t.path().join("B").join("lpt9_.工事")).unwrap();
+    let r = exchange::import(&file, &t.path().join("B"), ImportMode::New, "device-b", &Cancel::new(), &mut noop()).unwrap();
+    assert!(r.root.ends_with("LPT9_.工事 (2)"), "{}", r.root);
+}
+
+/// manifest の容量の申告を偽装した引継ぎファイルを拒否し、取込み先に何も作らない
+#[test]
+fn exchange_rejects_forged_sizes() {
+    let t = tempfile::tempdir().unwrap();
+    let (mut a, _, _) = ledger_with_photos(t.path(), 3);
+    let file = t.path().join("ok.aoalb");
+    exchange::export(&mut a, &file, &Cancel::new(), &mut noop()).unwrap();
+    let dest = t.path().join("dest");
+    fs::create_dir_all(&dest).unwrap();
+    let forge = |label: &str, f: &dyn Fn(&mut serde_json::Value)| -> aoalb_core::AppError {
+        let out = t.path().join(format!("{label}.aoalb"));
+        rewrite_zip(&file, &out, |name, data| {
+            if name != "manifest.json" {
+                return Some((name.into(), data.to_vec()));
+            }
+            let mut v: serde_json::Value = serde_json::from_slice(data).unwrap();
+            f(&mut v);
+            Some((name.into(), serde_json::to_vec(&v).unwrap()))
+        });
+        let e = exchange::import(&out, &dest, ImportMode::New, DEV, &Cancel::new(), &mut noop()).err().unwrap_or_else(|| panic!("{label} accepted"));
+        assert!(exchange::preview(&out, &[], &dest).is_err(), "{label}: preview");
+        e
+    };
+    let real_total = {
+        let ins = exchange::inspect(&file, &Cancel::new(), true).unwrap();
+        assert_eq!(ins.verified_total, ins.manifest.total_bytes);
+        ins.verified_total
+    };
+    assert!(forge("zero", &|v| v["totalBytes"] = 0.into()).detail.contains("total mismatch"));
+    assert!(forge("small", &|v| v["totalBytes"] = (real_total - 1).into()).detail.contains("total mismatch"));
+    assert!(forge("big", &|v| v["totalBytes"] = (real_total * 1000).into()).detail.contains("total mismatch"));
+    assert!(forge("u64max", &|v| v["totalBytes"] = u64::MAX.into()).detail.contains("total mismatch"));
+    // 個々の容量を巨大にして合計を桁あふれさせる
+    let e = forge("overflow", &|v| {
+        let f = v["files"].as_array_mut().unwrap();
+        f[0]["bytes"] = u64::MAX.into();
+        f[1]["bytes"] = u64::MAX.into();
+    });
+    assert!(e.detail.contains("overflow"), "{}", e.detail);
+    // 合計は合っているが、個々の容量がZIPの中身と違う
+    let e = forge("shifted", &|v| {
+        let f = v["files"].as_array_mut().unwrap();
+        let a = f[0]["bytes"].as_u64().unwrap();
+        let b = f[1]["bytes"].as_u64().unwrap();
+        f[0]["bytes"] = (a + 1).into();
+        f[1]["bytes"] = (b - 1).into();
+    });
+    assert!(e.detail.contains("size mismatch"), "{}", e.detail);
+    // 総容量の上限超え（申告と合計を一致させても拒否）
+    let e = forge("toolarge", &|v| {
+        let f = v["files"].as_array_mut().unwrap();
+        let jpg = f.iter_mut().find(|x| x["path"].as_str().unwrap().ends_with(".jpg")).unwrap();
+        jpg["bytes"] = (100u64 * 1024 * 1024).into();
+        let sum: u64 = v["files"].as_array().unwrap().iter().map(|x| x["bytes"].as_u64().unwrap()).sum();
+        v["totalBytes"] = sum.into();
+    });
+    assert!(e.detail.contains("size mismatch") || e.detail.contains("too large"), "{}", e.detail);
+    // JPEG 1枚の上限超え
+    let e = forge("bigjpeg", &|v| {
+        let f = v["files"].as_array_mut().unwrap();
+        let jpg = f.iter_mut().find(|x| x["path"].as_str().unwrap().ends_with(".jpg")).unwrap();
+        jpg["bytes"] = (101u64 * 1024 * 1024).into();
+        let sum: u64 = v["files"].as_array().unwrap().iter().map(|x| x["bytes"].as_u64().unwrap()).sum();
+        v["totalBytes"] = sum.into();
+    });
+    assert!(e.detail.contains("jpeg too large"), "{}", e.detail);
+    // ファイル一覧の重複
+    let e = forge("dup", &|v| {
+        let f = v["files"].as_array_mut().unwrap();
+        let d = f[0].clone();
+        f.push(d);
+        let sum: u64 = v["files"].as_array().unwrap().iter().map(|x| x["bytes"].as_u64().unwrap()).sum();
+        v["totalBytes"] = sum.into();
+    });
+    assert!(e.detail.contains("file list mismatch"), "{}", e.detail);
+    // 大文字小文字だけ違う項目（ZIP側）
+    let case = t.path().join("case.aoalb");
+    rewrite_zip(&file, &case, |n, d| Some((n.into(), d.to_vec())));
+    append_entry(&case, "Manifest.json");
+    assert!(exchange::import(&case, &dest, ImportMode::New, DEV, &Cancel::new(), &mut noop()).is_err());
+    // どの失敗でも取込み先に何も残さない
+    assert_eq!(fs::read_dir(&dest).unwrap().count(), 0);
+    // 書出し側の合計も一致
+    let ins = exchange::inspect(&file, &Cancel::new(), false).unwrap();
+    assert_eq!(ins.manifest.files.iter().map(|f| f.bytes).sum::<u64>(), ins.manifest.total_bytes);
+}
+
+#[test]
+fn manifest_size_limits() {
+    let base = |files: Vec<exchange::FileEntry>, total: u64| exchange::Manifest {
+        format: exchange::FORMAT.into(),
+        format_version: 1,
+        app_version: "t".into(),
+        export_id: util::new_uuid(),
+        exported_at: "t".into(),
+        project_uuid: util::new_uuid(),
+        project_name: "x".into(),
+        generation: 1,
+        edit_seq: 0,
+        last_device_id: "d".into(),
+        export_device_id: "d".into(),
+        counts: serde_json::json!({}),
+        total_bytes: total,
+        files,
+    };
+    let jpg = |n: usize, b: u64| exchange::FileEntry { path: format!("originals/{}.jpg", uuid_n(n)), bytes: b, sha256: "0".repeat(64) };
+    // 1TiBを超える総容量（100MB×10,486枚）は、申告と一致していても拒否
+    let files: Vec<_> = (0..10_486).map(|i| jpg(i, 100 * 1024 * 1024)).collect();
+    let sum: u64 = files.iter().map(|f| f.bytes).sum();
+    assert!(sum > exchange::MAX_TOTAL_BYTES);
+    let e = exchange::verify_manifest_sizes(&base(files, sum)).err().unwrap();
+    assert!(e.detail.contains("total too large"), "{}", e.detail);
+    // 写真の枚数の上限
+    let files: Vec<_> = (0..exchange::MAX_PHOTOS + 1).map(|i| jpg(i, 1)).collect();
+    let n = files.len() as u64;
+    assert!(exchange::verify_manifest_sizes(&base(files, n)).is_err());
+    // JSONの上限
+    let big = exchange::FileEntry { path: "data/photos.json".into(), bytes: exchange::MAX_JSON + 1, sha256: "0".repeat(64) };
+    let e = exchange::verify_manifest_sizes(&base(vec![big], exchange::MAX_JSON + 1)).err().unwrap();
+    assert!(e.detail.contains("json too large"));
+    // 桁あふれ
+    let e = exchange::verify_manifest_sizes(&base(vec![jpg(1, u64::MAX), jpg(2, 1)], 0)).err().unwrap();
+    assert!(e.detail.contains("overflow"));
+    // 上限ちょうどは受け付ける
+    let ok = vec![jpg(1, 5), exchange::FileEntry { path: "data/project.json".into(), bytes: exchange::MAX_JSON, sha256: "0".repeat(64) }];
+    assert_eq!(exchange::verify_manifest_sizes(&base(ok, exchange::MAX_JSON + 5)).unwrap(), exchange::MAX_JSON + 5);
+}
+
+fn uuid_n(n: usize) -> String {
+    format!("00000000-0000-4000-8000-{n:012x}")
+}
+
+/// PDFの上限：見積りが上限以内なら作成、超えるなら作成しない、作成中に超えたら中止。いずれも途中ファイルを残さない
+#[test]
+fn pdf_size_limit_before_and_during() {
+    let t = tempfile::tempdir().unwrap();
+    let (mut p, l, ids) = ledger_with_photos(t.path(), 12);
+    let s = slot_ids(&ledger::detail(&p.conn, &l).unwrap());
+    ledger::apply_ops(&mut p, &l, &[Op::PlaceMany { from: s[0].clone(), photos: ids.clone() }]).unwrap();
+    let hashes = originals_hashes(&p);
+    let exports = p.root.join("exports");
+    let leftovers = || fs::read_dir(&exports).unwrap().filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().contains("partial")).count();
+    let est = pdf::estimate(&p, &l, pdf::PDF_MAX_BYTES).unwrap();
+    assert!(est.within_limit);
+    assert_eq!(est.images, 12);
+    // 上限ちょうど（見積りと同じ）：作成でき、実際の容量は見積り以下
+    let ok = exports.join("ok.pdf");
+    let r = pdf::export_ledger_pdf_with(&p, &l, &ok, &Cancel::new(), &mut noop(), pdf::PdfLimits { max_bytes: est.bytes, precheck: true }).unwrap();
+    assert!(r.bytes <= est.bytes, "見積り {} 実際 {}", est.bytes, r.bytes);
+    // 上限を1バイトでも下回る：作成を開始しない
+    let ng = exports.join("ng.pdf");
+    let e = pdf::export_ledger_pdf_with(&p, &l, &ng, &Cancel::new(), &mut noop(), pdf::PdfLimits { max_bytes: est.bytes - 1, precheck: true }).err().unwrap();
+    assert!(e.message.contains("上限") && e.message.contains("ページを分け"), "{}", e.message);
+    assert!(!ng.exists());
+    // 作成中に上限へ達する：途中で中止し、完成品も途中ファイルも残さない
+    let mid = exports.join("mid.pdf");
+    let e = pdf::export_ledger_pdf_with(&p, &l, &mid, &Cancel::new(), &mut noop(), pdf::PdfLimits { max_bytes: r.bytes / 2, precheck: false }).err().unwrap();
+    assert!(e.detail.contains("pdf size limit"), "{}", e.detail);
+    assert!(!mid.exists());
+    assert_eq!(leftovers(), 0);
+    // 既定の上限は classic xref の範囲内で、3割以上の余裕
+    const { assert!(pdf::PDF_MAX_BYTES * 13 / 10 <= pdf::CLASSIC_XREF_MAX_OFFSET, "classic xref に3割以上の余裕") };
+    // 上限を超える見積りは作成前に断る（上限を小さくして確認。原寸は変更しない）
+    let big = pdf::estimate(&p, &l, 1_000_000).unwrap();
+    assert!(!big.within_limit && big.message.unwrap().contains("作成しません"));
+    assert_eq!(hashes, originals_hashes(&p));
 }

@@ -33,6 +33,8 @@ export class TauriRepository {
   // ---- 分類
   classify(photoUuids, changes) { return call("classify_apply", { photoUuids, changes }); }
   restoreClassification(states) { return call("classify_restore", { states }); }
+  previewFolderClassification() { return call("folder_classification_preview"); }
+  applyFolderClassification() { return call("folder_classification_apply"); }
   classifyMeta() { return call("classify_meta"); }
   saveTemplate(uuid, name, values) { return call("template_save", { uuid, name, values }); }
   deleteTemplate(uuid) { return call("template_delete", { uuid }); }

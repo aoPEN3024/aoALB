@@ -24,6 +24,7 @@ pub enum Reason {
     BeforeImportPhotos,
     OnClose,
     BeforeRecovery,
+    BeforeFolderClassification,
 }
 impl Reason {
     fn slug(self) -> &'static str {
@@ -36,6 +37,7 @@ impl Reason {
             Reason::BeforeImportPhotos => "before-import-photos",
             Reason::OnClose => "on-close",
             Reason::BeforeRecovery => "before-recovery",
+            Reason::BeforeFolderClassification => "before-folder-classification",
         }
     }
     pub fn label(slug: &str) -> &'static str {
@@ -48,6 +50,7 @@ impl Reason {
             "before-import-photos" => "写真取込みの前",
             "on-close" => "工事を閉じる時",
             "before-recovery" => "写真の復旧の前",
+            "before-folder-classification" => "フォルダから分類を復元する前",
             _ => "その他",
         }
     }

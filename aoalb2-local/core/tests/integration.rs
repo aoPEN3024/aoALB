@@ -127,7 +127,7 @@ fn import_general_jpeg_keeps_original_bytes_and_detects_duplicates() {
     assert_eq!((r2.accepted, r2.duplicates), (0, 2));
     // 失敗分だけ再試行（重複も取り込む指定）
     let ids: Vec<i64> = r2.failures.iter().map(|f| f.id).collect();
-    let r3 = photos::retry_failures(&mut p, &ids, ImportOptions { allow_duplicates: true }, &Cancel::new(), &mut noop()).unwrap();
+    let r3 = photos::retry_failures(&mut p, &ids, ImportOptions { allow_duplicates: true, ..Default::default() }, &Cancel::new(), &mut noop()).unwrap();
     assert_eq!(r3.accepted, 2);
     // 一時ファイルが残っていない
     assert_eq!(fs::read_dir(p.tmp_dir()).unwrap().count(), 0);
@@ -178,6 +178,108 @@ fn folder_and_zip_import_with_cancel() {
     assert!(r.cancelled);
     assert_eq!(r.accepted, 0);
     assert_eq!(fs::read_dir(p.tmp_dir()).unwrap().count(), 0);
+}
+
+#[test]
+fn aopic_folder_classification_import_and_recovery_preserve_existing_values() {
+    let t = tempfile::tempdir().unwrap();
+    let zip_path = t.path().join("folder-classification.zip");
+    {
+        let mut z = zip::ZipWriter::new(fs::File::create(&zip_path).unwrap());
+        let o = zip::write::SimpleFileOptions::default();
+        for (name, seed) in [
+            ("仮設工/足場架設/枠組足場設置/20261001_001.jpg", 31),
+            ("準備工/20261001_002.jpg", 32),
+        ] {
+            z.start_file(name, o).unwrap();
+            z.write_all(&synth::with_comment(&synth::jpeg(640, 480, seed, 75), name)).unwrap();
+        }
+        z.finish().unwrap();
+    }
+
+    // 新規取込みでは、明示指定した時だけフォルダ分類を元分類として保存する。
+    let mut imported = new_project(t.path(), "フォルダ分類取込み");
+    let r = photos::import(
+        &mut imported,
+        &ImportSource::Zip { path: zip_path.clone() },
+        ImportOptions { folder_classification: true, ..Default::default() },
+        &Cancel::new(),
+        &mut noop(),
+    )
+    .unwrap();
+    assert_eq!((r.accepted, r.folder_classified), (2, 2));
+    let rows = photos::list_photos(&imported.conn, &PhotoFilter::default()).unwrap();
+    assert_eq!(rows[0].original.koushu, "仮設工");
+    assert_eq!(rows[0].original.shubetsu, "足場架設");
+    assert_eq!(rows[0].original.saibetsu, "枠組足場設置");
+    assert_eq!(rows[1].original.koushu, "準備工");
+    assert!(rows[1].original.shubetsu.is_empty());
+    assert!(rows.iter().all(|p| p.overridden.is_empty() && p.source_kind == "general"));
+
+    // 既存の未分類写真は上書き分類として救済し、手動値は維持する。
+    let mut recovered = new_project(t.path(), "既存写真の分類復元");
+    let r = photos::import(
+        &mut recovered,
+        &ImportSource::Zip { path: zip_path },
+        ImportOptions::default(),
+        &Cancel::new(),
+        &mut noop(),
+    )
+    .unwrap();
+    assert_eq!(r.folder_classified, 0);
+    let before = photos::list_photos(&recovered.conn, &PhotoFilter::default()).unwrap();
+    let first = before.iter().find(|p| p.folder_label.starts_with("仮設工/")).unwrap();
+    let mut manual = BTreeMap::new();
+    manual.insert("koushu".to_string(), FieldChange::Set("手動の工種".into()));
+    classify::apply(&mut recovered, std::slice::from_ref(&first.uuid), &manual).unwrap();
+
+    let preview = classify::folder_classification_preview(&recovered.conn).unwrap();
+    assert_eq!(preview.photo_count, 2);
+    assert_eq!((preview.koushu_count, preview.shubetsu_count, preview.saibetsu_count), (1, 1, 1));
+    let result = classify::apply_folder_classification(&mut recovered).unwrap();
+    assert_eq!((result.changed_photos, result.changed_koushu, result.changed_shubetsu, result.changed_saibetsu), (2, 1, 1, 1));
+    let after = photos::list_photos(&recovered.conn, &PhotoFilter::default()).unwrap();
+    let first = after.iter().find(|p| p.folder_label.starts_with("仮設工/")).unwrap();
+    assert_eq!(first.classification.koushu, "手動の工種");
+    assert_eq!(first.classification.shubetsu, "足場架設");
+    assert_eq!(first.classification.saibetsu, "枠組足場設置");
+    assert_eq!(classify::folder_classification_preview(&recovered.conn).unwrap().photo_count, 0);
+}
+
+#[test]
+fn aopic_json_classification_has_priority_over_folder_names() {
+    let t = tempfile::tempdir().unwrap();
+    let zip_path = t.path().join("aopic-normal.zip");
+    let file_path = "フォルダ工種/フォルダ種別/フォルダ細別/20261001_001.jpg";
+    {
+        let mut z = zip::ZipWriter::new(fs::File::create(&zip_path).unwrap());
+        let o = zip::write::SimpleFileOptions::default();
+        z.start_file(file_path, o).unwrap();
+        z.write_all(&synth::jpeg(640, 480, 41, 75)).unwrap();
+        z.start_file("photos.json", o).unwrap();
+        let meta = serde_json::json!({"app":"aoPIC","photos":[{
+            "filePath":file_path,"koushu":"正式工種","shubetsu":"正式種別","saibetsu":"正式細別","sokuten":"P1","tekiyo":"施工前"
+        }]});
+        z.write_all(meta.to_string().as_bytes()).unwrap();
+        z.finish().unwrap();
+    }
+    let mut p = new_project(t.path(), "正式分類優先");
+    let r = photos::import(
+        &mut p,
+        &ImportSource::Zip { path: zip_path },
+        ImportOptions { folder_classification: true, ..Default::default() },
+        &Cancel::new(),
+        &mut noop(),
+    )
+    .unwrap();
+    assert_eq!(r.folder_classified, 0);
+    let row = photos::list_photos(&p.conn, &PhotoFilter::default()).unwrap().remove(0);
+    assert_eq!(row.source_kind, "aopic");
+    assert_eq!(row.classification.koushu, "正式工種");
+    assert_eq!(row.classification.shubetsu, "正式種別");
+    assert_eq!(row.classification.saibetsu, "正式細別");
+    assert_eq!(row.classification.sokuten, "P1");
+    assert_eq!(row.classification.tekiyo, "施工前");
 }
 
 #[test]

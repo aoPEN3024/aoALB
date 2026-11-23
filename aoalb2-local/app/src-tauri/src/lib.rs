@@ -277,6 +277,22 @@ fn classify_restore(state: State<AppState>, states: Vec<OverrideState>) -> Res<V
 }
 
 #[tauri::command]
+fn folder_classification_preview(state: State<AppState>) -> Res<classify::FolderClassificationPreview> {
+    with_project(&state, |p| classify::folder_classification_preview(&p.conn))
+}
+
+#[tauri::command]
+fn folder_classification_apply(state: State<AppState>) -> Res<classify::FolderClassificationResult> {
+    with_project(&state, |p| {
+        let preview = classify::folder_classification_preview(&p.conn)?;
+        if preview.photo_count > 0 {
+            backup::create(p, backup::Reason::BeforeFolderClassification)?;
+        }
+        classify::apply_folder_classification(p)
+    })
+}
+
+#[tauri::command]
 fn classify_meta(state: State<AppState>) -> Res<Value> {
     with_project(&state, |p| {
         let mut sugg = serde_json::Map::new();
@@ -559,6 +575,8 @@ pub fn run() {
             thumbnails_rebuild,
             classify_apply,
             classify_restore,
+            folder_classification_preview,
+            folder_classification_apply,
             classify_meta,
             template_save,
             template_delete,

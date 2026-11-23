@@ -188,17 +188,20 @@ async function closeProject() {
 
 // ------------------------------------------------------------------ 取込み
 async function importDialog(preset = null) {
+  const folderClassify = h("input", { type: "checkbox", checked: true });
   const choose = async kind => {
     let source = null;
     if (kind === "files") { const f = await repo.pickFiles(); if (f?.length) source = { kind: "files", paths: Array.isArray(f) ? f : [f] }; }
     if (kind === "folder") { const d = await repo.pickFolder("写真のフォルダを選ぶ（SDカードのDCIM等）"); if (d) source = { kind: "folder", path: d }; }
     if (kind === "zip") { const z = await repo.pickFiles({ zip: true, multiple: false }); if (z) source = { kind: "zip", path: Array.isArray(z) ? z[0] : z }; }
-    if (source) { close(); await doImport(source); }
+    if (source) { close(); await doImport(source, { folderClassification: kind !== "files" && folderClassify.checked }); }
   };
   const close = modal("写真を取り込む", h("div", { class: "import-choices" },
     h("button", { class: "big", onclick: () => choose("files") }, "写真ファイルを選ぶ", h("small", {}, "JPEG（複数選択可）。aoPICのZIPもここから選べます")),
     h("button", { class: "big", onclick: () => choose("folder") }, "フォルダごと取り込む", h("small", {}, "SDカード・デジカメからコピーしたフォルダ")),
     h("button", { class: "big", onclick: () => choose("zip") }, "ZIPを取り込む", h("small", {}, "aoPICの台帳用ZIP・通常ZIP")),
+    h("label", { class: "check" }, folderClassify, "フォルダの1～3階層を工種・種別・細別として取り込む"),
+    h("p", { class: "muted" }, "aoPICの正式な分類情報が入っている場合は、そちらを優先します。デジカメのDCIMフォルダを取り込む場合は、このチェックを外してください。"),
     h("p", { class: "muted" }, "この画面へ写真やフォルダをドラッグ＆ドロップしても取り込めます。同じ写真は自動では重ねて取り込みません。")), [{ label: "閉じる" }]);
   if (preset) { close(); await doImport(preset); }
 }
@@ -217,6 +220,7 @@ function showImportResult(r) {
   const bad = r.failures.filter(f => f.kind !== "duplicate");
   const body = h("div", {},
     h("p", { class: "result-line" }, `取り込んだ写真：${r.accepted}枚`),
+    r.folderClassified ? h("p", {}, `フォルダ階層から分類を設定した写真：${r.folderClassified}枚`) : null,
     r.cancelled ? h("p", { class: "warn" }, `途中で中止しました。取り込み済みの${r.accepted}枚は残っています。`) : null,
     dup.length ? h("p", {}, `同じ写真がすでにあるため取り込まなかった写真：${dup.length}枚`) : null,
     bad.length ? h("p", { class: "warn" }, `取り込めなかった写真：${bad.length}枚`) : null,
@@ -238,8 +242,7 @@ let photoList = [];
 
 async function renderPhotos(main) {
   const f = state.photoFilter;
-  const folders = await repo.folderLabels();
-  const meta = await repo.classifyMeta();
+  const [folders, meta, folderPreview] = await Promise.all([repo.folderLabels(), repo.classifyMeta(), repo.previewFolderClassification()]);
   const count = h("span", { class: "count" });
   const selInfo = h("span", { class: "sel-info" });
   const gridHost = h("div", { class: "grid-host", tabindex: 0 });
@@ -265,10 +268,31 @@ async function renderPhotos(main) {
     h("span", {}, "〜"), h("input", { type: "date", value: f.takenToDay || "", onchange: e => { f.takenToDay = e.target.value || null; f.takenTo = e.target.value ? nextDay(e.target.value) : null; refresh(false); } }),
     h("select", { onchange: e => { f.koushu = e.target.value === "__all" ? null : e.target.value; refresh(false); } }, h("option", { value: "__all" }, "工種：すべて"), ...meta.suggestions.koushu.map(v => h("option", { value: v, selected: f.koushu === v }, v))),
     h("label", { class: "check" }, h("input", { type: "checkbox", checked: !!f.trashed, onchange: e => { f.trashed = e.target.checked; state.selection.clear(); refresh(false); } }), "ごみ箱"));
+  const showFolderClassification = () => {
+    const rows = folderPreview.mappings.slice(0, 30).map(m => h("tr", {},
+      h("td", {}, m.folderLabel), h("td", {}, m.koushu || "—"), h("td", {}, m.shubetsu || "—"), h("td", {}, m.saibetsu || "—"), h("td", { class: "num" }, m.candidateCount)));
+    modal("フォルダから分類を復元", h("div", {},
+      h("p", {}, `空欄を補完できる写真：${folderPreview.photoCount}枚`),
+      h("p", {}, `工種 ${folderPreview.koushuCount}件・種別 ${folderPreview.shubetsuCount}件・細別 ${folderPreview.saibetsuCount}件`),
+      h("p", { class: "muted" }, "1階層目を工種、2階層目を種別、3階層目を細別として使います。測点と摘要は変更しません。aoPICの正式な分類と手動編集済みの値は上書きしません。実行前に自動バックアップを作成します。"),
+      h("table", { class: "table" }, h("thead", {}, h("tr", {}, ...["取込みフォルダ", "工種", "種別", "細別", "写真"].map(x => h("th", {}, x)))), h("tbody", {}, ...rows)),
+      folderPreview.mappings.length > 30 ? h("p", { class: "muted" }, `ほか${folderPreview.mappings.length - 30}件`) : null), [
+      { label: "分類を復元する", primary: true, onClick: async () => {
+        try {
+          const r = await repo.applyFolderClassification();
+          state.selection.clear(); state.classUndo = []; state.classRedo = [];
+          toast(`${r.changedPhotos}枚の空欄分類を復元しました。`);
+          render();
+        } catch (e) { toast(message(e), "error"); return false; }
+      } },
+      { label: "キャンセル" },
+    ]);
+  };
   const tools = h("div", { class: "toolbar" }, count, selInfo,
     h("button", { onclick: () => { photoList.forEach(p => state.selection.add(p.uuid)); grid.redrawVisible(); updateSel(); } }, "表示中を全選択"),
     h("button", { onclick: () => { state.selection.clear(); grid.redrawVisible(); updateSel(); } }, "選択解除"),
     h("button", { onclick: () => groupByTime() }, "撮影時刻で区切って選ぶ"),
+    h("button", { disabled: !folderPreview.photoCount, onclick: showFolderClassification }, folderPreview.photoCount ? `フォルダから分類を復元（${folderPreview.photoCount}枚）` : "フォルダから分類を復元"),
     f.trashed ? h("button", { onclick: async () => { await repo.restorePhotos([...state.selection]); state.selection.clear(); refresh(); toast("写真を戻しました。"); } }, "選択を元に戻す")
       : h("button", { class: "ghost", onclick: async () => { if (!state.selection.size) return; try { await repo.trashPhotos([...state.selection]); state.selection.clear(); refresh(); toast("ごみ箱へ移しました（原寸写真は残っています）。"); } catch (e) { toast(message(e), "error"); } } }, "ごみ箱へ"));
   // 分類パネル

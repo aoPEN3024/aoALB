@@ -36,6 +36,9 @@ pub struct ImportOptions {
     /// 同じ写真がすでにあっても取り込む
     #[serde(default)]
     pub allow_duplicates: bool,
+    /// フォルダの1～3階層を工種・種別・細別として取り込む
+    #[serde(default)]
+    pub folder_classification: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -55,6 +58,8 @@ pub struct ImportResult {
     pub accepted: u64,
     pub duplicates: u64,
     pub failed: u64,
+    /// フォルダ階層から分類を設定した写真数
+    pub folder_classified: u64,
     pub cancelled: bool,
     pub photo_uuids: Vec<String>,
     pub failures: Vec<ImportFailure>,
@@ -343,7 +348,18 @@ impl<'a> Importer<'a> {
         } else {
             (None, "unknown")
         };
-        let cls = aopic.as_ref().and_then(|a| a.get("classification")).cloned().unwrap_or(Value::Null);
+        // aoPICのmanifest/photos.jsonを最優先する。正式なメタデータがない時だけ、
+        // 利用者が明示的に選んだフォルダ分類を使う。
+        let folder_cls = if aopic.is_none() && self.opts.folder_classification {
+            classification_from_folder(&folder_label)
+        } else {
+            Classification::default()
+        };
+        let cls = aopic
+            .as_ref()
+            .and_then(|a| a.get("classification"))
+            .cloned()
+            .unwrap_or_else(|| serde_json::to_value(&folder_cls).unwrap_or(Value::Null));
         let f = |k: &str| cls.get(k).and_then(|v| v.as_str()).unwrap_or("").chars().take(500).collect::<String>();
         let ts = now();
         let insert = (|| -> Result<()> {
@@ -358,6 +374,9 @@ impl<'a> Importer<'a> {
                     f("koushu"), f("shubetsu"), f("saibetsu"), f("sokuten"), f("tekiyo"), aopic.as_ref().map(|a| a.to_string()), exif.json.to_string(), ts])?;
             Project::touch(&tx, &self.project.device_id)?;
             tx.commit()?;
+            if !folder_cls.is_empty() {
+                self.result.folder_classified += 1;
+            }
             Ok(())
         })();
         if let Err(e) = insert {
@@ -743,6 +762,27 @@ impl Classification {
     }
     pub fn is_empty(&self) -> bool {
         FIELDS.iter().all(|f| self.get(f).is_empty())
+    }
+}
+
+/// aoPIC通常ZIPのフォルダ構成を分類へ変換する。
+/// 1階層目=工種、2階層目=種別、3階層目=細別。測点・摘要はフォルダから推測しない。
+pub fn classification_from_folder(folder_label: &str) -> Classification {
+    let parts: Vec<String> = folder_label
+        .split(['/', '\\'])
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && *s != ".")
+        .take(3)
+        .map(|s| s.chars().take(200).collect())
+        .collect();
+    if parts.first().is_none_or(|s| s == "未分類") {
+        return Classification::default();
+    }
+    Classification {
+        koushu: parts.first().cloned().unwrap_or_default(),
+        shubetsu: parts.get(1).cloned().unwrap_or_default(),
+        saibetsu: parts.get(2).cloned().unwrap_or_default(),
+        ..Default::default()
     }
 }
 

@@ -8,6 +8,11 @@ const uuid = () => crypto.randomUUID();
 const now = () => new Date().toISOString();
 const empty = () => Object.fromEntries(FIELDS.map(f => [f, ""]));
 const err = (message, kind = "invalid") => Object.assign(new Error(message), { kind, message });
+const folderClassification = label => {
+  const p = String(label || "").split(/[\\/]/).map(x => x.trim()).filter(Boolean).slice(0, 3);
+  if (!p.length || p[0] === "未分類") return { koushu: "", shubetsu: "", saibetsu: "" };
+  return { koushu: p[0] || "", shubetsu: p[1] || "", saibetsu: p[2] || "" };
+};
 
 export class MemoryRepository {
   constructor(count = 300) {
@@ -132,6 +137,33 @@ export class MemoryRepository {
       p.override = Object.fromEntries(FIELDS.filter(f => s[f] != null).map(f => [f, s[f]]));
     }
     return before;
+  }
+  async previewFolderClassification() {
+    const mappings = new Map();
+    const result = { photoCount: 0, koushuCount: 0, shubetsuCount: 0, saibetsuCount: 0, mappings: [] };
+    for (const p of this.photos.filter(x => !x.deletedAt && x.sourceKind !== "aopic" && x.folderLabel)) {
+      const current = this._row(p).classification;
+      const inferred = folderClassification(p.folderLabel);
+      const fill = { koushu: !current.koushu && !!inferred.koushu, shubetsu: !current.shubetsu && !!inferred.shubetsu, saibetsu: !current.saibetsu && !!inferred.saibetsu };
+      if (!Object.values(fill).some(Boolean)) continue;
+      result.photoCount++;
+      for (const k of ["koushu", "shubetsu", "saibetsu"]) if (fill[k]) result[`${k}Count`]++;
+      const m = mappings.get(p.folderLabel) || { folderLabel: p.folderLabel, photoCount: 0, candidateCount: 0, ...inferred };
+      m.photoCount++; m.candidateCount++; mappings.set(p.folderLabel, m);
+    }
+    result.mappings = [...mappings.values()];
+    return result;
+  }
+  async applyFolderClassification() {
+    const result = { changedPhotos: 0, changedKoushu: 0, changedShubetsu: 0, changedSaibetsu: 0 };
+    for (const p of this.photos.filter(x => !x.deletedAt && x.sourceKind !== "aopic" && x.folderLabel)) {
+      const current = this._row(p).classification;
+      const inferred = folderClassification(p.folderLabel);
+      let changed = false;
+      for (const k of ["koushu", "shubetsu", "saibetsu"]) if (!current[k] && inferred[k]) { p.override[k] = inferred[k]; result[`changed${k[0].toUpperCase()}${k.slice(1)}`]++; changed = true; }
+      if (changed) result.changedPhotos++;
+    }
+    return result;
   }
   async classifyMeta() {
     const suggestions = {};

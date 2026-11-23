@@ -2,13 +2,132 @@
 //! 項目単位・全項目で元分類へ戻せる。元に戻す／やり直すは、変更前の上書き状態を返して画面側で保持する。
 
 use crate::error::{AppError, Result};
-use crate::photos::FIELDS;
+use crate::photos::{Classification, FIELDS, classification_from_folder};
 use crate::project::Project;
 use crate::util::{self, now};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
+
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderClassificationMapping {
+    pub folder_label: String,
+    pub photo_count: usize,
+    pub candidate_count: usize,
+    pub koushu: String,
+    pub shubetsu: String,
+    pub saibetsu: String,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderClassificationPreview {
+    pub photo_count: usize,
+    pub koushu_count: usize,
+    pub shubetsu_count: usize,
+    pub saibetsu_count: usize,
+    pub mappings: Vec<FolderClassificationMapping>,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderClassificationResult {
+    pub changed_photos: usize,
+    pub changed_koushu: usize,
+    pub changed_shubetsu: usize,
+    pub changed_saibetsu: usize,
+}
+
+#[derive(Debug)]
+struct FolderCandidate {
+    uuid: String,
+    folder_label: String,
+    inferred: Classification,
+    current: Classification,
+}
+
+fn folder_candidates(conn: &Connection) -> Result<Vec<FolderCandidate>> {
+    let mut stmt = conn.prepare(
+        "select p.uuid, p.folder_label,
+         coalesce(o.koushu, p.orig_koushu), coalesce(o.shubetsu, p.orig_shubetsu), coalesce(o.saibetsu, p.orig_saibetsu),
+         coalesce(o.sokuten, p.orig_sokuten), coalesce(o.tekiyo, p.orig_tekiyo)
+         from photos p left join photo_overrides o on o.photo_uuid = p.uuid
+         where p.deleted_at is null and p.folder_label <> '' and p.source_kind <> 'aopic' and p.aopic_json is null
+         order by p.folder_label, p.photo_number, p.uuid",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        let folder_label: String = r.get(1)?;
+        Ok(FolderCandidate {
+            uuid: r.get(0)?,
+            inferred: classification_from_folder(&folder_label),
+            folder_label,
+            current: Classification { koushu: r.get(2)?, shubetsu: r.get(3)?, saibetsu: r.get(4)?, sokuten: r.get(5)?, tekiyo: r.get(6)? },
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+/// フォルダ分類で空欄を補完できる写真と対応関係を返す。aoPICの正式なメタデータは対象外。
+pub fn folder_classification_preview(conn: &Connection) -> Result<FolderClassificationPreview> {
+    let mut preview = FolderClassificationPreview::default();
+    let mut mappings: BTreeMap<String, FolderClassificationMapping> = BTreeMap::new();
+    for c in folder_candidates(conn)? {
+        let k = c.current.koushu.is_empty() && !c.inferred.koushu.is_empty();
+        let s = c.current.shubetsu.is_empty() && !c.inferred.shubetsu.is_empty();
+        let d = c.current.saibetsu.is_empty() && !c.inferred.saibetsu.is_empty();
+        if !(k || s || d) {
+            continue;
+        }
+        preview.photo_count += 1;
+        preview.koushu_count += usize::from(k);
+        preview.shubetsu_count += usize::from(s);
+        preview.saibetsu_count += usize::from(d);
+        let m = mappings.entry(c.folder_label.clone()).or_insert_with(|| FolderClassificationMapping {
+            folder_label: c.folder_label,
+            koushu: c.inferred.koushu.clone(),
+            shubetsu: c.inferred.shubetsu.clone(),
+            saibetsu: c.inferred.saibetsu.clone(),
+            ..Default::default()
+        });
+        m.photo_count += 1;
+        m.candidate_count += 1;
+    }
+    preview.mappings = mappings.into_values().collect();
+    Ok(preview)
+}
+
+/// 空欄の分類だけをフォルダ階層で補完する。手動編集済み・aoPIC由来の分類は上書きしない。
+pub fn apply_folder_classification(project: &mut Project) -> Result<FolderClassificationResult> {
+    let candidates = folder_candidates(&project.conn)?;
+    let tx = project.conn.transaction()?;
+    let mut result = FolderClassificationResult::default();
+    for c in candidates {
+        let mut state = load_state(&tx, &c.uuid)?;
+        let mut changed = false;
+        for (field, current, inferred, count) in [
+            ("koushu", c.current.koushu.as_str(), c.inferred.koushu.as_str(), &mut result.changed_koushu),
+            ("shubetsu", c.current.shubetsu.as_str(), c.inferred.shubetsu.as_str(), &mut result.changed_shubetsu),
+            ("saibetsu", c.current.saibetsu.as_str(), c.inferred.saibetsu.as_str(), &mut result.changed_saibetsu),
+        ] {
+            if current.is_empty() && !inferred.is_empty() {
+                *state.field_mut(field) = Some(inferred.to_string());
+                *count += 1;
+                changed = true;
+            }
+        }
+        if changed {
+            save_state(&tx, &state)?;
+            result.changed_photos += 1;
+        }
+    }
+    if result.changed_photos > 0 {
+        Project::touch(&tx, &project.device_id)?;
+    }
+    tx.commit()?;
+    Ok(result)
+}
 
 pub const MAX_FIELD_CHARS: usize = 200;
 

@@ -187,10 +187,7 @@ fn aopic_folder_classification_import_and_recovery_preserve_existing_values() {
     {
         let mut z = zip::ZipWriter::new(fs::File::create(&zip_path).unwrap());
         let o = zip::write::SimpleFileOptions::default();
-        for (name, seed) in [
-            ("仮設工/足場架設/枠組足場設置/20261001_001.jpg", 31),
-            ("準備工/20261001_002.jpg", 32),
-        ] {
+        for (name, seed) in [("仮設工/足場架設/枠組足場設置/20261001_001.jpg", 31), ("準備工/20261001_002.jpg", 32)] {
             z.start_file(name, o).unwrap();
             z.write_all(&synth::with_comment(&synth::jpeg(640, 480, seed, 75), name)).unwrap();
         }
@@ -218,14 +215,7 @@ fn aopic_folder_classification_import_and_recovery_preserve_existing_values() {
 
     // 既存の未分類写真は上書き分類として救済し、手動値は維持する。
     let mut recovered = new_project(t.path(), "既存写真の分類復元");
-    let r = photos::import(
-        &mut recovered,
-        &ImportSource::Zip { path: zip_path },
-        ImportOptions::default(),
-        &Cancel::new(),
-        &mut noop(),
-    )
-    .unwrap();
+    let r = photos::import(&mut recovered, &ImportSource::Zip { path: zip_path }, ImportOptions::default(), &Cancel::new(), &mut noop()).unwrap();
     assert_eq!(r.folder_classified, 0);
     let before = photos::list_photos(&recovered.conn, &PhotoFilter::default()).unwrap();
     let first = before.iter().find(|p| p.folder_label.starts_with("仮設工/")).unwrap();

@@ -84,7 +84,21 @@ export class MemoryRepository {
     if (f.takenTo) list = list.filter(p => (p.takenAt || "") < f.takenTo);
     for (const k of ["koushu", "shubetsu", "saibetsu"]) if (f[k] != null) list = list.filter(p => p.classification[k] === f[k]);
     if (f.uuids) { const s = new Set(f.uuids); list = list.filter(p => s.has(p.uuid)); }
-    return list.sort((a, b) => (a.takenAt || "").localeCompare(b.takenAt || "") || a.photoNumber - b.photoNumber);
+    const direction = f.sortDesc ? -1 : 1;
+    const number = (a, b) => ((a.photoNumber || 0) - (b.photoNumber || 0)) || a.uuid.localeCompare(b.uuid);
+    const text = (a, b, key) => (a[key] || "").localeCompare(b[key] || "", "ja", { numeric: true, sensitivity: "base" });
+    return list.sort((a, b) => {
+      let compared = 0;
+      if (f.sortBy === "name") compared = text(a, b, "originalName");
+      else if (f.sortBy === "koushu") {
+        const ak = a.classification.koushu || ""; const bk = b.classification.koushu || "";
+        if (!ak !== !bk) return !ak ? 1 : -1;
+        compared = ak.localeCompare(bk, "ja", { numeric: true, sensitivity: "base" })
+          || (a.classification.shubetsu || "").localeCompare(b.classification.shubetsu || "", "ja", { numeric: true, sensitivity: "base" })
+          || (a.classification.saibetsu || "").localeCompare(b.classification.saibetsu || "", "ja", { numeric: true, sensitivity: "base" });
+      } else compared = (a.takenAt || a.createdAt || "").localeCompare(b.takenAt || b.createdAt || "");
+      return compared ? compared * direction : number(a, b) * direction;
+    });
   }
   async photoDetail(id) {
     const p = this.photos.find(x => x.uuid === id);

@@ -134,6 +134,48 @@ fn import_general_jpeg_keeps_original_bytes_and_detects_duplicates() {
 }
 
 #[test]
+fn photo_list_sorting_is_stable_and_whitelisted() {
+    let t = tempfile::tempdir().unwrap();
+    let mut p = new_project(t.path(), "並び替え工事");
+    import_files(&mut p, write_photos(&t.path().join("src-sort"), 3));
+    let rows = photos::list_photos(&p.conn, &PhotoFilter::default()).unwrap();
+    let ids: Vec<_> = rows.iter().map(|r| r.uuid.clone()).collect();
+    for (id, date, name, koushu) in [
+        (&ids[0], "2026-10-03T10:00:00", "B_002.jpg", "塗装工"),
+        (&ids[1], "2026-10-01T10:00:00", "C_003.jpg", ""),
+        (&ids[2], "2026-10-02T10:00:00", "A_001.jpg", "仮設工"),
+    ] {
+        p.conn
+            .execute(
+                "update photos set taken_at = ?2, original_name = ?3, orig_koushu = ?4 where uuid = ?1",
+                rusqlite::params![id, date, name, koushu],
+            )
+            .unwrap();
+    }
+    let order = |filter: PhotoFilter| {
+        photos::list_photos(&p.conn, &filter)
+            .unwrap()
+            .into_iter()
+            .map(|r| r.uuid)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(order(PhotoFilter { sort_by: Some("date".into()), ..Default::default() }), vec![ids[1].clone(), ids[2].clone(), ids[0].clone()]);
+    assert_eq!(
+        order(PhotoFilter { sort_by: Some("date".into()), sort_desc: true, ..Default::default() }),
+        vec![ids[0].clone(), ids[2].clone(), ids[1].clone()]
+    );
+    assert_eq!(order(PhotoFilter { sort_by: Some("name".into()), ..Default::default() }), vec![ids[2].clone(), ids[0].clone(), ids[1].clone()]);
+    assert_eq!(order(PhotoFilter { sort_by: Some("koushu".into()), ..Default::default() }), vec![ids[2].clone(), ids[0].clone(), ids[1].clone()]);
+    assert_eq!(
+        order(PhotoFilter { sort_by: Some("koushu".into()), sort_desc: true, ..Default::default() }),
+        vec![ids[0].clone(), ids[2].clone(), ids[1].clone()]
+    );
+    // 未知の値でもSQL断片には使わず、既定の撮影日順へ戻す。
+    assert_eq!(order(PhotoFilter { sort_by: Some("name desc; drop table photos".into()), ..Default::default() }), vec![ids[1].clone(), ids[2].clone(), ids[0].clone()]);
+    assert_eq!(photos::list_photos(&p.conn, &PhotoFilter::default()).unwrap().len(), 3);
+}
+
+#[test]
 fn same_photo_can_be_imported_into_another_project() {
     let t = tempfile::tempdir().unwrap();
     let files = write_photos(&t.path().join("src"), 2);

@@ -820,6 +820,11 @@ pub struct PhotoFilter {
     #[serde(default)]
     pub unplaced_only: bool,
     pub uuids: Option<Vec<String>>,
+    /// date / koushu / name。未知の値は date として扱う。
+    pub sort_by: Option<String>,
+    /// true: 降順、false: 昇順
+    #[serde(default)]
+    pub sort_desc: bool,
 }
 
 pub const PHOTO_SELECT: &str = "select p.uuid, p.photo_uid, p.source_kind, p.photo_number, p.taken_at, p.taken_at_source, p.width, p.height, p.orientation, p.bytes,
@@ -928,7 +933,21 @@ pub fn list_photos(conn: &Connection, f: &PhotoFilter) -> Result<Vec<PhotoRow>> 
     if let Some(ids) = &f.uuids {
         add(&mut args, &mut sql, " and p.uuid in (select value from json_each(?))", Box::new(serde_json::to_string(ids)?));
     }
-    sql.push_str(" order by coalesce(p.taken_at, p.created_at), p.photo_number");
+    // 列名を利用者入力から組み立てず、許可した並び順だけを選ぶ。
+    let direction = if f.sort_desc { "desc" } else { "asc" };
+    let order = match f.sort_by.as_deref().unwrap_or("date") {
+        "koushu" => format!(
+            "case when coalesce(o.koushu, p.orig_koushu) = '' then 1 else 0 end,
+             coalesce(o.koushu, p.orig_koushu) collate nocase {direction},
+             coalesce(o.shubetsu, p.orig_shubetsu) collate nocase {direction},
+             coalesce(o.saibetsu, p.orig_saibetsu) collate nocase {direction},
+             coalesce(p.taken_at, p.created_at) {direction}, p.photo_number {direction}, p.uuid {direction}"
+        ),
+        "name" => format!("p.original_name collate nocase {direction}, p.photo_number {direction}, p.uuid {direction}"),
+        _ => format!("coalesce(p.taken_at, p.created_at) {direction}, p.photo_number {direction}, p.uuid {direction}"),
+    };
+    sql.push_str(" order by ");
+    sql.push_str(&order);
     let mut stmt = conn.prepare(&sql)?;
     let params: Vec<&dyn rusqlite::ToSql> = args.iter().map(|b| b.as_ref()).collect();
     let rows = stmt.query_map(params.as_slice(), map_row)?;

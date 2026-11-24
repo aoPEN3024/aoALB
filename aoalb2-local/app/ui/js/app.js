@@ -77,7 +77,7 @@ async function runTask(title, fn) {
 }
 
 // ------------------------------------------------------------------ 状態
-const state = { screen: "home", project: null, info: null, photoFilter: {}, selection: new Set(), lastClicked: null, classUndo: [], classRedo: [], ledger: null };
+const state = { screen: "home", project: null, info: null, photoFilter: { sortBy: "date", sortDesc: false }, selection: new Set(), lastClicked: null, classUndo: [], classRedo: [], ledger: null };
 
 function header() {
   const saveBadge = h("span", { id: "save-status", class: "save-status" });
@@ -267,6 +267,15 @@ async function renderPhotos(main) {
     h("label", {}, "撮影日", h("input", { type: "date", value: f.takenFrom?.slice(0, 10) || "", onchange: e => { f.takenFrom = e.target.value || null; refresh(false); } })),
     h("span", {}, "〜"), h("input", { type: "date", value: f.takenToDay || "", onchange: e => { f.takenToDay = e.target.value || null; f.takenTo = e.target.value ? nextDay(e.target.value) : null; refresh(false); } }),
     h("select", { onchange: e => { f.koushu = e.target.value === "__all" ? null : e.target.value; refresh(false); } }, h("option", { value: "__all" }, "工種：すべて"), ...meta.suggestions.koushu.map(v => h("option", { value: v, selected: f.koushu === v }, v))),
+    h("select", { "aria-label": "写真の並び順", onchange: e => {
+      const [sortBy, direction] = e.target.value.split(":");
+      f.sortBy = sortBy; f.sortDesc = direction === "desc"; state.lastClicked = null; refresh(false);
+    } },
+    ...[
+      ["date:asc", "並び順：撮影日（古い順）"], ["date:desc", "並び順：撮影日（新しい順）"],
+      ["koushu:asc", "並び順：工種（あいうえお順）"], ["koushu:desc", "並び順：工種（逆順）"],
+      ["name:asc", "並び順：写真名（昇順）"], ["name:desc", "並び順：写真名（降順）"],
+    ].map(([value, label]) => h("option", { value, selected: value === `${f.sortBy || "date"}:${f.sortDesc ? "desc" : "asc"}` }, label))),
     h("label", { class: "check" }, h("input", { type: "checkbox", checked: !!f.trashed, onchange: e => { f.trashed = e.target.checked; state.selection.clear(); refresh(false); } }), "ごみ箱"));
   const showFolderClassification = () => {
     const rows = folderPreview.mappings.slice(0, 30).map(m => h("tr", {},

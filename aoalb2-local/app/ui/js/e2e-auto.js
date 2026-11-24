@@ -54,6 +54,15 @@ export async function run(projectRoot) {
       result.ledger = { pages: ledgers[0].pageCount, photos: ledgers[0].photoCount, openMs: Math.round(performance.now() - t1) };
       mark("ledger-open");
       await sleep(2000);
+      const spreadButton = [...document.querySelectorAll(".tabs button")].find(b => b.textContent.trim() === "見開き");
+      spreadButton?.click();
+      await waitFor(() => document.querySelector(".pages.spread > .page-frame.cover"));
+      const cover = document.querySelector(".pages.spread > .page-frame.cover").getBoundingClientRect();
+      const photoPages = [...document.querySelectorAll(".pages.spread > .page-frame:not(.cover)")].slice(0, 2).map(e => e.getBoundingClientRect());
+      const coverIsStandalone = photoPages.length === 2 && photoPages[0].top >= cover.bottom - 1;
+      const photosAreSpread = coverIsStandalone && Math.abs(photoPages[0].top - photoPages[1].top) < 2 && photoPages[1].left > photoPages[0].left;
+      result.spreadWithCover = { coverIsStandalone, photosAreSpread };
+      if (!coverIsStandalone || !photosAreSpread) throw new Error("見開きで表紙が単独ページになっていません。");
       result.ledgerScroll = await scrollThrough(document.querySelector(".pages"), 2.5, 30);
       mark("ledger-scrolled");
       await sleep(3000);

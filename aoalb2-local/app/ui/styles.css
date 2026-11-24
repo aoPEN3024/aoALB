@@ -98,6 +98,7 @@ dd { margin: 0; }
 .title-input { font-weight: 700; font-size: 15px; min-width: 240px; }
 .pages { flex: 1; overflow: auto; display: grid; justify-content: center; gap: 18px; padding: 10px 0 40px; grid-template-columns: 520px; }
 .pages.spread { grid-template-columns: 520px 520px; }
+.pages.spread > .page-frame.cover { grid-column: 1 / -1; justify-self: center; }
 .page-frame { min-height: 760px; }
 .page-tools { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
 .page { width: 520px; height: 735px; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.12); padding: 49px 34px 27px 59px; display: flex; flex-direction: column; gap: 5px; position: relative; }

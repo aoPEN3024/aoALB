@@ -137,34 +137,51 @@ fn import_general_jpeg_keeps_original_bytes_and_detects_duplicates() {
 fn photo_list_sorting_is_stable_and_whitelisted() {
     let t = tempfile::tempdir().unwrap();
     let mut p = new_project(t.path(), "並び替え工事");
-    import_files(&mut p, write_photos(&t.path().join("src-sort"), 3));
+    let src = t.path().join("src-sort");
+    fs::create_dir_all(&src).unwrap();
+    let base = synth::jpeg(800, 600, 3, 80);
+    let files = [
+        ("B_002.jpg", "2026:10:03 10:00:00"),
+        ("C_003.jpg", "2026:10:01 10:00:00"),
+        ("A_001.jpg", "2026:10:02 10:00:00"),
+    ]
+    .into_iter()
+    .map(|(name, date)| {
+        let path = src.join(name);
+        fs::write(&path, synth::with_exif(&base, Some(date), Some(1))).unwrap();
+        path
+    })
+    .collect();
+    import_files(&mut p, files);
     let rows = photos::list_photos(&p.conn, &PhotoFilter::default()).unwrap();
-    let ids: Vec<_> = rows.iter().map(|r| r.uuid.clone()).collect();
-    for (id, date, name, koushu) in [
-        (&ids[0], "2026-10-03T10:00:00", "B_002.jpg", "塗装工"),
-        (&ids[1], "2026-10-01T10:00:00", "C_003.jpg", ""),
-        (&ids[2], "2026-10-02T10:00:00", "A_001.jpg", "仮設工"),
-    ] {
-        p.conn
-            .execute("update photos set taken_at = ?2, original_name = ?3, orig_koushu = ?4 where uuid = ?1", rusqlite::params![id, date, name, koushu])
-            .unwrap();
+    let ids: BTreeMap<_, _> = rows.into_iter().map(|r| (r.original_name, r.uuid)).collect();
+    let a = ids["A_001.jpg"].clone();
+    let b = ids["B_002.jpg"].clone();
+    let c = ids["C_003.jpg"].clone();
+    for (id, koushu) in [(&b, "塗装工"), (&a, "仮設工")] {
+        classify::apply(
+            &mut p,
+            std::slice::from_ref(id),
+            &BTreeMap::from([("koushu".into(), FieldChange::Set(koushu.into()))]),
+        )
+        .unwrap();
     }
     let order = |filter: PhotoFilter| photos::list_photos(&p.conn, &filter).unwrap().into_iter().map(|r| r.uuid).collect::<Vec<_>>();
-    assert_eq!(order(PhotoFilter { sort_by: Some("date".into()), ..Default::default() }), vec![ids[1].clone(), ids[2].clone(), ids[0].clone()]);
+    assert_eq!(order(PhotoFilter { sort_by: Some("date".into()), ..Default::default() }), vec![c.clone(), a.clone(), b.clone()]);
     assert_eq!(
         order(PhotoFilter { sort_by: Some("date".into()), sort_desc: true, ..Default::default() }),
-        vec![ids[0].clone(), ids[2].clone(), ids[1].clone()]
+        vec![b.clone(), a.clone(), c.clone()]
     );
-    assert_eq!(order(PhotoFilter { sort_by: Some("name".into()), ..Default::default() }), vec![ids[2].clone(), ids[0].clone(), ids[1].clone()]);
-    assert_eq!(order(PhotoFilter { sort_by: Some("koushu".into()), ..Default::default() }), vec![ids[2].clone(), ids[0].clone(), ids[1].clone()]);
+    assert_eq!(order(PhotoFilter { sort_by: Some("name".into()), ..Default::default() }), vec![a.clone(), b.clone(), c.clone()]);
+    assert_eq!(order(PhotoFilter { sort_by: Some("koushu".into()), ..Default::default() }), vec![a.clone(), b.clone(), c.clone()]);
     assert_eq!(
         order(PhotoFilter { sort_by: Some("koushu".into()), sort_desc: true, ..Default::default() }),
-        vec![ids[0].clone(), ids[2].clone(), ids[1].clone()]
+        vec![b.clone(), a.clone(), c.clone()]
     );
     // 未知の値でもSQL断片には使わず、既定の撮影日順へ戻す。
     assert_eq!(
         order(PhotoFilter { sort_by: Some("name desc; drop table photos".into()), ..Default::default() }),
-        vec![ids[1].clone(), ids[2].clone(), ids[0].clone()]
+        vec![c, a, b]
     );
     assert_eq!(photos::list_photos(&p.conn, &PhotoFilter::default()).unwrap().len(), 3);
 }

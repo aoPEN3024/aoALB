@@ -146,19 +146,10 @@ fn photo_list_sorting_is_stable_and_whitelisted() {
         (&ids[2], "2026-10-02T10:00:00", "A_001.jpg", "仮設工"),
     ] {
         p.conn
-            .execute(
-                "update photos set taken_at = ?2, original_name = ?3, orig_koushu = ?4 where uuid = ?1",
-                rusqlite::params![id, date, name, koushu],
-            )
+            .execute("update photos set taken_at = ?2, original_name = ?3, orig_koushu = ?4 where uuid = ?1", rusqlite::params![id, date, name, koushu])
             .unwrap();
     }
-    let order = |filter: PhotoFilter| {
-        photos::list_photos(&p.conn, &filter)
-            .unwrap()
-            .into_iter()
-            .map(|r| r.uuid)
-            .collect::<Vec<_>>()
-    };
+    let order = |filter: PhotoFilter| photos::list_photos(&p.conn, &filter).unwrap().into_iter().map(|r| r.uuid).collect::<Vec<_>>();
     assert_eq!(order(PhotoFilter { sort_by: Some("date".into()), ..Default::default() }), vec![ids[1].clone(), ids[2].clone(), ids[0].clone()]);
     assert_eq!(
         order(PhotoFilter { sort_by: Some("date".into()), sort_desc: true, ..Default::default() }),
@@ -171,7 +162,10 @@ fn photo_list_sorting_is_stable_and_whitelisted() {
         vec![ids[0].clone(), ids[2].clone(), ids[1].clone()]
     );
     // 未知の値でもSQL断片には使わず、既定の撮影日順へ戻す。
-    assert_eq!(order(PhotoFilter { sort_by: Some("name desc; drop table photos".into()), ..Default::default() }), vec![ids[1].clone(), ids[2].clone(), ids[0].clone()]);
+    assert_eq!(
+        order(PhotoFilter { sort_by: Some("name desc; drop table photos".into()), ..Default::default() }),
+        vec![ids[1].clone(), ids[2].clone(), ids[0].clone()]
+    );
     assert_eq!(photos::list_photos(&p.conn, &PhotoFilter::default()).unwrap().len(), 3);
 }
 

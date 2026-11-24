@@ -140,18 +140,14 @@ fn photo_list_sorting_is_stable_and_whitelisted() {
     let src = t.path().join("src-sort");
     fs::create_dir_all(&src).unwrap();
     let base = synth::jpeg(800, 600, 3, 80);
-    let files = [
-        ("B_002.jpg", "2026:10:03 10:00:00"),
-        ("C_003.jpg", "2026:10:01 10:00:00"),
-        ("A_001.jpg", "2026:10:02 10:00:00"),
-    ]
-    .into_iter()
-    .map(|(name, date)| {
-        let path = src.join(name);
-        fs::write(&path, synth::with_exif(&base, Some(date), Some(1))).unwrap();
-        path
-    })
-    .collect();
+    let files = [("B_002.jpg", "2026:10:03 10:00:00"), ("C_003.jpg", "2026:10:01 10:00:00"), ("A_001.jpg", "2026:10:02 10:00:00")]
+        .into_iter()
+        .map(|(name, date)| {
+            let path = src.join(name);
+            fs::write(&path, synth::with_exif(&base, Some(date), Some(1))).unwrap();
+            path
+        })
+        .collect();
     import_files(&mut p, files);
     let rows = photos::list_photos(&p.conn, &PhotoFilter::default()).unwrap();
     let ids: BTreeMap<_, _> = rows.into_iter().map(|r| (r.original_name, r.uuid)).collect();
@@ -159,30 +155,16 @@ fn photo_list_sorting_is_stable_and_whitelisted() {
     let b = ids["B_002.jpg"].clone();
     let c = ids["C_003.jpg"].clone();
     for (id, koushu) in [(&b, "塗装工"), (&a, "仮設工")] {
-        classify::apply(
-            &mut p,
-            std::slice::from_ref(id),
-            &BTreeMap::from([("koushu".into(), FieldChange::Set(koushu.into()))]),
-        )
-        .unwrap();
+        classify::apply(&mut p, std::slice::from_ref(id), &BTreeMap::from([("koushu".into(), FieldChange::Set(koushu.into()))])).unwrap();
     }
     let order = |filter: PhotoFilter| photos::list_photos(&p.conn, &filter).unwrap().into_iter().map(|r| r.uuid).collect::<Vec<_>>();
     assert_eq!(order(PhotoFilter { sort_by: Some("date".into()), ..Default::default() }), vec![c.clone(), a.clone(), b.clone()]);
-    assert_eq!(
-        order(PhotoFilter { sort_by: Some("date".into()), sort_desc: true, ..Default::default() }),
-        vec![b.clone(), a.clone(), c.clone()]
-    );
+    assert_eq!(order(PhotoFilter { sort_by: Some("date".into()), sort_desc: true, ..Default::default() }), vec![b.clone(), a.clone(), c.clone()]);
     assert_eq!(order(PhotoFilter { sort_by: Some("name".into()), ..Default::default() }), vec![a.clone(), b.clone(), c.clone()]);
     assert_eq!(order(PhotoFilter { sort_by: Some("koushu".into()), ..Default::default() }), vec![a.clone(), b.clone(), c.clone()]);
-    assert_eq!(
-        order(PhotoFilter { sort_by: Some("koushu".into()), sort_desc: true, ..Default::default() }),
-        vec![b.clone(), a.clone(), c.clone()]
-    );
+    assert_eq!(order(PhotoFilter { sort_by: Some("koushu".into()), sort_desc: true, ..Default::default() }), vec![b.clone(), a.clone(), c.clone()]);
     // 未知の値でもSQL断片には使わず、既定の撮影日順へ戻す。
-    assert_eq!(
-        order(PhotoFilter { sort_by: Some("name desc; drop table photos".into()), ..Default::default() }),
-        vec![c, a, b]
-    );
+    assert_eq!(order(PhotoFilter { sort_by: Some("name desc; drop table photos".into()), ..Default::default() }), vec![c, a, b]);
     assert_eq!(photos::list_photos(&p.conn, &PhotoFilter::default()).unwrap().len(), 3);
 }
 

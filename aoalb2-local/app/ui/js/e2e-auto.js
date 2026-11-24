@@ -61,7 +61,11 @@ export async function run(projectRoot) {
       const photoPages = [...document.querySelectorAll(".pages.spread > .page-frame:not(.cover)")].slice(0, 2).map(e => e.getBoundingClientRect());
       const coverIsStandalone = photoPages.length === 2 && photoPages[0].top >= cover.bottom - 1;
       const photosAreSpread = coverIsStandalone && Math.abs(photoPages[0].top - photoPages[1].top) < 2 && photoPages[1].left > photoPages[0].left;
-      result.spreadWithCover = { coverIsStandalone, photosAreSpread };
+      result.spreadWithCover = {
+        coverIsStandalone, photosAreSpread,
+        cover: { top: Math.round(cover.top), bottom: Math.round(cover.bottom) },
+        photos: photoPages.map(r => ({ top: Math.round(r.top), left: Math.round(r.left) })),
+      };
       if (!coverIsStandalone || !photosAreSpread) throw new Error("見開きで表紙が単独ページになっていません。");
       result.ledgerScroll = await scrollThrough(document.querySelector(".pages"), 2.5, 30);
       mark("ledger-scrolled");

@@ -41,6 +41,11 @@ export class TauriRepository {
 
   // ---- 台帳
   listLedgers(trashed = false) { return call("ledgers_list", { trashed }); }
+  listLedgerFolders() { return call("ledger_folders_list"); }
+  createLedgerFolder(name) { return call("ledger_folder_create", { name }); }
+  renameLedgerFolder(uuid, name) { return call("ledger_folder_rename", { uuid, name }); }
+  deleteLedgerFolder(uuid) { return call("ledger_folder_delete", { uuid }); }
+  moveLedgerToFolder(ledgerUuid, folderUuid = null) { return call("ledger_move_to_folder", { ledgerUuid, folderUuid }); }
   createLedger(title) { return call("ledger_create", { title }); }
   ledgerDetail(uuid) { return call("ledger_detail", { uuid }); }
   applyLedgerOps(uuid, ops) { return call("ledger_apply", { uuid, ops }); }

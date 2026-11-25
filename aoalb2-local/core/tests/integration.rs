@@ -479,6 +479,40 @@ fn ledger_trash_restore_purge_never_touch_photos() {
 }
 
 #[test]
+fn ledger_folders_are_non_destructive_and_persist() {
+    let t = tempfile::tempdir().unwrap();
+    let mut p = new_project(t.path(), "台帳整理工事");
+    let a = ledger::create(&mut p, "出来形台帳", 1).unwrap();
+    let b = ledger::create(&mut p, "品質台帳", 1).unwrap();
+    assert!(ledger::list(&p.conn, false).unwrap().iter().all(|l| l.folder_uuid.is_none()));
+
+    let done = ledger::create_folder(&mut p, "完了分").unwrap();
+    let current = ledger::create_folder(&mut p, "施工中").unwrap();
+    ledger::move_to_folder(&mut p, &a.uuid, Some(&done.uuid)).unwrap();
+    ledger::move_to_folder(&mut p, &b.uuid, Some(&current.uuid)).unwrap();
+    let renamed = ledger::rename_folder(&mut p, &current.uuid, "確認中").unwrap();
+    assert_eq!(renamed.name, "確認中");
+
+    let copy = ledger::duplicate(&mut p, &a.uuid, "出来形台帳（複製）").unwrap();
+    let rows = ledger::list(&p.conn, false).unwrap();
+    assert_eq!(rows.iter().find(|l| l.uuid == copy.uuid).unwrap().folder_uuid.as_deref(), Some(done.uuid.as_str()));
+
+    ledger::trash(&mut p, &a.uuid).unwrap();
+    ledger::restore(&mut p, &a.uuid).unwrap();
+    assert_eq!(ledger::list(&p.conn, false).unwrap().iter().find(|l| l.uuid == a.uuid).unwrap().folder_uuid.as_deref(), Some(done.uuid.as_str()));
+
+    let root = p.root.clone();
+    p.close().unwrap();
+    let (mut p, _) = project::open_project(&root, DEV).unwrap();
+    assert_eq!(ledger::folders(&p.conn).unwrap().len(), 2);
+    ledger::delete_folder(&mut p, &done.uuid).unwrap();
+    let rows = ledger::list(&p.conn, false).unwrap();
+    assert_eq!(rows.len(), 3, "フォルダ削除で台帳を削除しない");
+    assert!(rows.iter().filter(|l| l.uuid == a.uuid || l.uuid == copy.uuid).all(|l| l.folder_uuid.is_none()));
+    assert_eq!(ledger::folders(&p.conn).unwrap().len(), 1);
+}
+
+#[test]
 fn crash_recovery_detects_and_cleans() {
     let t = tempfile::tempdir().unwrap();
     let mut p = new_project(t.path(), "異常終了工事");
@@ -590,6 +624,8 @@ fn exchange_round_trip_and_generation_warning() {
     photos::import(&mut a, &ImportSource::Zip { path: zip_path }, ImportOptions::default(), &Cancel::new(), &mut noop()).unwrap();
     let s = slot_ids(&ledger::detail(&a.conn, &l).unwrap());
     ledger::apply_ops(&mut a, &l, &[Op::PlaceMany { from: s[0].clone(), photos: ids.clone() }]).unwrap();
+    let folder = ledger::create_folder(&mut a, "出来形").unwrap();
+    ledger::move_to_folder(&mut a, &l, Some(&folder.uuid)).unwrap();
     let mut ch = BTreeMap::new();
     ch.insert("koushu".to_string(), FieldChange::Set("足場工".into()));
     classify::apply(&mut a, &ids[..2], &ch).unwrap();
@@ -605,6 +641,8 @@ fn exchange_round_trip_and_generation_warning() {
     let la = ledger::detail(&a.conn, &l).unwrap();
     let lb = ledger::detail(&b.conn, &l).unwrap();
     assert_eq!(contents(&la), contents(&lb));
+    assert_eq!(ledger::folders(&b.conn).unwrap(), vec![folder.clone()]);
+    assert_eq!(ledger::list(&b.conn, false).unwrap().iter().find(|x| x.uuid == l).unwrap().folder_uuid.as_deref(), Some(folder.uuid.as_str()));
     let pa = photos::list_photos(&a.conn, &PhotoFilter::default()).unwrap();
     let pb = photos::list_photos(&b.conn, &PhotoFilter::default()).unwrap();
     assert_eq!(

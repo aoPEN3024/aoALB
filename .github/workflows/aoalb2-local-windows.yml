@@ -81,13 +81,13 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "構文エラー：$($f.Name)" }
           }
           Write-Output "構文確認：$($files.Count) ファイル"
-      - name: 画面ロジックの自動検証（20件以上）
+      - name: 画面ロジックの自動検証（24件以上）
         shell: pwsh
         run: |
-          node --test --test-reporter=tap app/tests/ledger-model.test.mjs app/tests/leave-guard.test.mjs app/tests/folder-classification.test.mjs app/tests/photo-sort.test.mjs | Tee-Object -FilePath node-tests.tap
+          node --test --test-reporter=tap app/tests/ledger-model.test.mjs app/tests/leave-guard.test.mjs app/tests/folder-classification.test.mjs app/tests/photo-sort.test.mjs app/tests/ledger-folders.test.mjs | Tee-Object -FilePath node-tests.tap
           if ($LASTEXITCODE -ne 0) { throw "Nodeテストが失敗しました" }
           $pass = (Select-String -Path node-tests.tap -Pattern '^# pass (\d+)').Matches.Groups[1].Value
-          if ([int]$pass -lt 20) { throw "Nodeテストの件数が不足しています（$pass 件）" }
+          if ([int]$pass -lt 24) { throw "Nodeテストの件数が不足しています（$pass 件）" }
 
       - name: 性能計測（3,000枚、計測用工事を残す）
         shell: pwsh

@@ -9,7 +9,8 @@
 //   写真     importPhotos / retryImport / listPhotos / photoDetail / trashPhotos / restorePhotos / folderLabels
 //            thumbUrl(photo) / originalUrl(photo)（同期。画像のURL）
 //   分類     classify(photoUuids, changes) → 変更前の状態 / restoreClassification(states) / previewFolderClassification / applyFolderClassification / classifyMeta / saveTemplate / deleteTemplate
-//   台帳     listLedgers / createLedger / ledgerDetail / applyLedgerOps(uuid, ops) / trashLedger / restoreLedger / purgeLedger / duplicateLedger / exportPdf
+//   台帳     listLedgers / listLedgerFolders / createLedgerFolder / renameLedgerFolder / deleteLedgerFolder / moveLedgerToFolder
+//            createLedger / ledgerDetail / applyLedgerOps(uuid, ops) / trashLedger / restoreLedger / purgeLedger / duplicateLedger / exportPdf
 //   引継ぎ   exchangePlan / exportExchange / previewExchange / importExchange
 //   バックアップ backupStatus / createBackup / periodicBackup / verifyBackup / restoreBackup
 //   共通     cancelTask / onProgress / onThumbnailsReady / pick* / confirm / onDropFiles / onCloseRequested

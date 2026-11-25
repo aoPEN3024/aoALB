@@ -80,6 +80,19 @@ dd { margin: 0; }
 .cap1 { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cap2 { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ledgers { padding: 16px; display: grid; gap: 12px; }
+.ledger-folders { display: grid; gap: 10px; }
+.ledger-folder { border: 1px solid var(--line); border-radius: 10px; background: #fff; overflow: hidden; }
+.ledger-folder.open { box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+.ledger-folder-head { min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; background: #f7f9fb; }
+.ledger-folder-toggle { flex: 1; border: 0; background: transparent; display: flex; align-items: center; gap: 8px; text-align: left; font-weight: 800; padding: 6px; }
+.ledger-folder-toggle:hover { background: var(--accent-soft); }
+.folder-arrow { width: 1.2em; color: var(--accent); }
+.folder-icon { color: #d39a22; font-size: 18px; transform: rotate(90deg); }
+.folder-count { color: var(--muted); font-weight: 400; font-size: 12px; }
+.ledger-folder-actions { flex: 0 0 auto; }
+.ledger-folder .table { border-left: 0; border-right: 0; border-bottom: 0; border-radius: 0; }
+.ledger-folder-empty { margin: 0; padding: 18px 24px; border-top: 1px solid var(--line); }
+.ledger-folder-select { min-width: 110px; max-width: 180px; }
 .tabs { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .tabs button { border: 0; border-radius: 0; }
 .tabs button.active { background: var(--accent); color: #fff; }

@@ -7,9 +7,13 @@ use crate::util::{self, now};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
+use std::collections::{BTreeMap, HashSet};
 
 pub const SLOTS_PER_PAGE: i64 = 3;
 pub const MAX_TITLE: usize = 200;
+pub const MAX_FOLDER_NAME: usize = 100;
+pub const MAX_FOLDERS: usize = 1000;
+pub const FOLDERS_META_KEY: &str = "ledger_folders_v1";
 pub const CAPTION_LIMITS: [(&str, usize); 3] = [("koushu", 200), ("sokuten", 200), ("body", 1000)];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -67,6 +71,125 @@ pub struct LedgerSummary {
     pub photo_count: i64,
     pub deleted_at: Option<String>,
     pub last_backup_at: Option<String>,
+    pub folder_uuid: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LedgerFolder {
+    pub uuid: String,
+    pub name: String,
+    pub position: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct LedgerFolderState {
+    #[serde(default)]
+    pub folders: Vec<LedgerFolder>,
+    #[serde(default)]
+    pub assignments: BTreeMap<String, String>,
+}
+
+fn check_folder_name(name: &str) -> Result<String> {
+    let name = name.trim();
+    if name.is_empty() { return Err(AppError::invalid("フォルダ名を入力してください。")); }
+    if name.chars().count() > MAX_FOLDER_NAME {
+        return Err(AppError::invalid(format!("フォルダ名は{MAX_FOLDER_NAME}文字以内にしてください。")));
+    }
+    Ok(name.into())
+}
+
+/// 保存値または引継ぎファイルのフォルダ情報を検証する。
+pub fn validate_folder_state(mut state: LedgerFolderState, allowed_ledgers: Option<&HashSet<String>>) -> Result<LedgerFolderState> {
+    if state.folders.len() > MAX_FOLDERS || state.assignments.len() > 50_000 {
+        return Err(AppError::invalid("台帳フォルダ情報が多すぎます。"));
+    }
+    let mut ids = HashSet::new();
+    let mut names = HashSet::new();
+    for (i, folder) in state.folders.iter_mut().enumerate() {
+        if !util::is_uuid(&folder.uuid) || !ids.insert(folder.uuid.clone()) {
+            return Err(AppError::invalid("台帳フォルダ情報が正しくありません。"));
+        }
+        folder.name = check_folder_name(&folder.name)?;
+        if !names.insert(folder.name.to_lowercase()) {
+            return Err(AppError::invalid("同じ名前の台帳フォルダがあります。"));
+        }
+        folder.position = i as i64;
+    }
+    state.assignments.retain(|ledger, folder| ids.contains(folder) && allowed_ledgers.map(|set| set.contains(ledger)).unwrap_or(true));
+    Ok(state)
+}
+
+pub fn folder_state(conn: &Connection) -> Result<LedgerFolderState> {
+    let Some(raw) = crate::db::get_meta(conn, FOLDERS_META_KEY)? else { return Ok(LedgerFolderState::default()); };
+    let state: LedgerFolderState = serde_json::from_str(&raw).map_err(|_| AppError::corrupt("台帳フォルダ情報を読み取れません。"))?;
+    validate_folder_state(state, None)
+}
+
+fn save_folder_state(conn: &Connection, state: &LedgerFolderState) -> Result<()> {
+    crate::db::set_meta(conn, FOLDERS_META_KEY, &serde_json::to_string(state)?)
+}
+
+pub fn folders(conn: &Connection) -> Result<Vec<LedgerFolder>> { Ok(folder_state(conn)?.folders) }
+
+pub fn create_folder(project: &mut Project, name: &str) -> Result<LedgerFolder> {
+    let name = check_folder_name(name)?;
+    let tx = project.conn.transaction()?;
+    let mut state = folder_state(&tx)?;
+    if state.folders.len() >= MAX_FOLDERS { return Err(AppError::invalid("台帳フォルダはこれ以上作れません。")); }
+    if state.folders.iter().any(|f| f.name.eq_ignore_ascii_case(&name)) { return Err(AppError::invalid("同じ名前のフォルダがあります。")); }
+    let folder = LedgerFolder { uuid: util::new_uuid(), name, position: state.folders.len() as i64 };
+    state.folders.push(folder.clone());
+    save_folder_state(&tx, &state)?;
+    Project::touch(&tx, &project.device_id)?;
+    tx.commit()?;
+    Ok(folder)
+}
+
+pub fn rename_folder(project: &mut Project, uuid: &str, name: &str) -> Result<LedgerFolder> {
+    let name = check_folder_name(name)?;
+    let tx = project.conn.transaction()?;
+    let mut state = folder_state(&tx)?;
+    if state.folders.iter().any(|f| f.uuid != uuid && f.name.eq_ignore_ascii_case(&name)) { return Err(AppError::invalid("同じ名前のフォルダがあります。")); }
+    let folder = state.folders.iter_mut().find(|f| f.uuid == uuid).ok_or_else(|| AppError::not_found("フォルダが見つかりません。"))?;
+    folder.name = name;
+    let result = folder.clone();
+    save_folder_state(&tx, &state)?;
+    Project::touch(&tx, &project.device_id)?;
+    tx.commit()?;
+    Ok(result)
+}
+
+/// フォルダだけを削除し、中の台帳は未分類へ戻す。
+pub fn delete_folder(project: &mut Project, uuid: &str) -> Result<()> {
+    let tx = project.conn.transaction()?;
+    let mut state = folder_state(&tx)?;
+    let before = state.folders.len();
+    state.folders.retain(|f| f.uuid != uuid);
+    if state.folders.len() == before { return Err(AppError::not_found("フォルダが見つかりません。")); }
+    state.assignments.retain(|_, folder| folder != uuid);
+    for (i, folder) in state.folders.iter_mut().enumerate() { folder.position = i as i64; }
+    save_folder_state(&tx, &state)?;
+    Project::touch(&tx, &project.device_id)?;
+    tx.commit()?;
+    Ok(())
+}
+
+pub fn move_to_folder(project: &mut Project, ledger_uuid: &str, folder_uuid: Option<&str>) -> Result<()> {
+    let tx = project.conn.transaction()?;
+    let exists: bool = tx.query_row("select exists(select 1 from ledgers where uuid = ?1 and deleted_at is null)", [ledger_uuid], |r| r.get(0))?;
+    if !exists { return Err(AppError::not_found("台帳が見つかりません。")); }
+    let mut state = folder_state(&tx)?;
+    match folder_uuid.filter(|s| !s.is_empty()) {
+        Some(folder) if state.folders.iter().any(|f| f.uuid == folder) => { state.assignments.insert(ledger_uuid.into(), folder.into()); }
+        Some(_) => return Err(AppError::not_found("移動先のフォルダが見つかりません。")),
+        None => { state.assignments.remove(ledger_uuid); }
+    }
+    save_folder_state(&tx, &state)?;
+    Project::touch(&tx, &project.device_id)?;
+    tx.commit()?;
+    Ok(())
 }
 
 /// 画面から送られる操作。JSONでは `{"op": "Place", "slot": "...", "photo": "..."}` の形（画面側 ledger-model.js と同じ名前）。
@@ -167,13 +290,16 @@ pub struct ApplyResult {
 pub fn list(conn: &Connection, trashed: bool) -> Result<Vec<LedgerSummary>> {
     let project_name: String = conn.query_row("select name from project", [], |r| r.get(0))?;
     let last_backup = crate::db::get_meta(conn, "last_backup_at")?;
+    let folders = folder_state(conn)?;
     let mut stmt = conn.prepare(&format!("select l.uuid, l.title, l.created_at, l.updated_at, l.deleted_at,
         (select count(*) from ledger_pages p where p.ledger_uuid = l.uuid and p.deleted_at is null),
         (select count(*) from ledger_slots s join ledger_pages p on p.uuid = s.page_uuid where s.ledger_uuid = l.uuid and p.deleted_at is null and s.kind = 'photo')
         from ledgers l where l.deleted_at is {} null order by l.updated_at desc", if trashed { "not" } else { "" }))?;
     let rows = stmt.query_map([], |r| {
+        let uuid: String = r.get(0)?;
         Ok(LedgerSummary {
-            uuid: r.get(0)?,
+            folder_uuid: folders.assignments.get(&uuid).cloned(),
+            uuid,
             title: r.get(1)?,
             project_name: project_name.clone(),
             created_at: r.get(2)?,
@@ -330,6 +456,9 @@ pub fn purge(project: &mut Project, uuid: &str) -> Result<()> {
     tx.execute("delete from ledger_slots where ledger_uuid = ?1", [uuid])?;
     tx.execute("delete from ledger_pages where ledger_uuid = ?1", [uuid])?;
     tx.execute("delete from ledgers where uuid = ?1", [uuid])?;
+    let mut folders = folder_state(&tx)?;
+    folders.assignments.remove(uuid);
+    save_folder_state(&tx, &folders)?;
     let photos_after: i64 = tx.query_row("select count(*) from photos", [], |r| r.get(0))?;
     if photos_before != photos_after {
         return Err(AppError::internal("purge changed photos"));
@@ -364,6 +493,11 @@ pub fn duplicate(project: &mut Project, uuid: &str, title: &str) -> Result<Ledge
     }
     tx.execute("insert into ledger_captions(ledger_uuid, photo_uuid, koushu, sokuten, body, updated_at) select ?1, photo_uuid, koushu, sokuten, body, ?3 from ledger_captions where ledger_uuid = ?2",
         params![new, uuid, ts])?;
+    let mut folders = folder_state(&tx)?;
+    if let Some(folder) = folders.assignments.get(uuid).cloned() {
+        folders.assignments.insert(new.clone(), folder);
+        save_folder_state(&tx, &folders)?;
+    }
     Project::touch(&tx, &project.device_id)?;
     tx.commit()?;
     detail(&project.conn, &new)

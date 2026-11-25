@@ -20,6 +20,8 @@ export class MemoryRepository {
     this.count = count;
     this.photos = [];
     this.ledgers = new Map();
+    this.ledgerFolders = [];
+    this.ledgerAssignments = new Map();
     this.deletedPages = new Map();
     this.templates = [];
     this.recent = [];
@@ -193,9 +195,35 @@ export class MemoryRepository {
 
   _summary(l) {
     return { uuid: l.uuid, title: l.title, projectName: this.project.name, createdAt: l.createdAt, updatedAt: l.updatedAt, pageCount: l.pages.length,
-      photoCount: l.pages.reduce((n, p) => n + p.slots.filter(s => s.kind === "photo").length, 0), deletedAt: l.deletedAt, lastBackupAt: null };
+      photoCount: l.pages.reduce((n, p) => n + p.slots.filter(s => s.kind === "photo").length, 0), deletedAt: l.deletedAt, lastBackupAt: null,
+      folderUuid: this.ledgerAssignments.get(l.uuid) || null };
   }
   async listLedgers(trashed = false) { return [...this.ledgers.values()].filter(l => !!l.deletedAt === trashed).map(l => this._summary(l)); }
+  async listLedgerFolders() { return clone(this.ledgerFolders); }
+  async createLedgerFolder(name) {
+    name = String(name).trim();
+    if (!name) throw err("フォルダ名を入力してください。");
+    if (this.ledgerFolders.some(f => f.name.toLocaleLowerCase("ja") === name.toLocaleLowerCase("ja"))) throw err("同じ名前のフォルダがあります。");
+    const folder = { uuid: uuid(), name, position: this.ledgerFolders.length };
+    this.ledgerFolders.push(folder); return clone(folder);
+  }
+  async renameLedgerFolder(id, name) {
+    name = String(name).trim();
+    const folder = this.ledgerFolders.find(f => f.uuid === id);
+    if (!folder) throw err("フォルダが見つかりません。", "not_found");
+    if (!name) throw err("フォルダ名を入力してください。");
+    if (this.ledgerFolders.some(f => f.uuid !== id && f.name.toLocaleLowerCase("ja") === name.toLocaleLowerCase("ja"))) throw err("同じ名前のフォルダがあります。");
+    folder.name = name; return clone(folder);
+  }
+  async deleteLedgerFolder(id) {
+    this.ledgerFolders = this.ledgerFolders.filter(f => f.uuid !== id);
+    for (const [ledger, folder] of this.ledgerAssignments) if (folder === id) this.ledgerAssignments.delete(ledger);
+  }
+  async moveLedgerToFolder(ledgerId, folderId = null) {
+    if (!this.ledgers.has(ledgerId)) throw err("台帳が見つかりません。", "not_found");
+    if (folderId && !this.ledgerFolders.some(f => f.uuid === folderId)) throw err("移動先のフォルダが見つかりません。", "not_found");
+    if (folderId) this.ledgerAssignments.set(ledgerId, folderId); else this.ledgerAssignments.delete(ledgerId);
+  }
   async createLedger(title) {
     if (!String(title).trim()) throw err("台帳名を入力してください。");
     const l = { uuid: uuid(), title: title.trim(), template: "construction-3", showCover: true, cover: { title: "工事写真帳", koushu: "", project: this.project.name, contractor: this.project.contractor },
@@ -220,11 +248,12 @@ export class MemoryRepository {
   }
   async trashLedger(id) { this.ledgers.get(id).deletedAt = now(); }
   async restoreLedger(id) { this.ledgers.get(id).deletedAt = null; }
-  async purgeLedger(id) { this.ledgers.delete(id); }
+  async purgeLedger(id) { this.ledgers.delete(id); this.ledgerAssignments.delete(id); }
   async duplicateLedger(id, title) {
     const src = clone(this.ledgers.get(id));
     src.uuid = uuid(); src.title = title; src.pages.forEach(p => { p.uuid = uuid(); p.slots.forEach(s => { s.uuid = uuid(); }); });
     this.ledgers.set(src.uuid, src);
+    const folder = this.ledgerAssignments.get(id); if (folder) this.ledgerAssignments.set(src.uuid, folder);
     return clone(src);
   }
   async pdfEstimate() { return { bytes: 0, pages: 0, images: 0, limit: 7e9, withinLimit: true, message: null }; }

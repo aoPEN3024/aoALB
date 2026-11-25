@@ -77,7 +77,8 @@ async function runTask(title, fn) {
 }
 
 // ------------------------------------------------------------------ 状態
-const state = { screen: "home", project: null, info: null, photoFilter: { sortBy: "date", sortDesc: false }, selection: new Set(), lastClicked: null, classUndo: [], classRedo: [], ledger: null };
+const state = { screen: "home", project: null, info: null, photoFilter: { sortBy: "date", sortDesc: false }, selection: new Set(), lastClicked: null, classUndo: [], classRedo: [], ledger: null,
+  ledgerFolderOpen: new Set(["__unclassified"]) };
 
 function header() {
   const saveBadge = h("span", { id: "save-status", class: "save-status" });
@@ -450,33 +451,62 @@ async function redoClass(refresh) {
 async function renderLedgers(main) {
   const trashed = !!state.ledgerTrash;
   const list = await repo.listLedgers(trashed);
+  const folders = trashed ? [] : await repo.listLedgerFolders();
   const title = h("input", { placeholder: "例：第1回 出来形写真", maxlength: 200 });
+  const createFolder = async () => {
+    const name = prompt("フォルダ名（例：出来形、品質管理、月別）", "");
+    if (!name?.trim()) return;
+    try { const folder = await repo.createLedgerFolder(name); state.ledgerFolderOpen.add(folder.uuid); toast("台帳フォルダを作りました。"); render(); }
+    catch (e) { toast(message(e), "error"); }
+  };
+  const ledgerTable = rows => h("table", { class: "table ledger-table" },
+    h("thead", {}, h("tr", {}, ...["台帳名", "工事名", "作成日時", "更新日時", "ページ数", "配置写真数", "整理先", "状態", "最終バックアップ", ""].map(x => h("th", {}, x)))),
+    h("tbody", {}, ...rows.map(l => h("tr", {},
+      h("td", {}, trashed ? l.title : h("button", { class: "link", onclick: () => go("editor", { ledgerUuid: l.uuid }) }, l.title)),
+      h("td", {}, l.projectName), h("td", {}, fmtDate(l.createdAt)), h("td", {}, fmtDate(l.updatedAt)), h("td", { class: "num" }, l.pageCount), h("td", { class: "num" }, l.photoCount),
+      h("td", {}, trashed ? "—" : h("select", { class: "ledger-folder-select", value: l.folderUuid || "", "aria-label": `${l.title}の整理先`, onchange: async e => {
+        e.currentTarget.disabled = true;
+        try { await repo.moveLedgerToFolder(l.uuid, e.currentTarget.value || null); toast("台帳の整理先を変更しました。"); render(); }
+        catch (err) { toast(message(err), "error"); render(); }
+      } }, h("option", { value: "" }, "未分類"), ...folders.map(f => h("option", { value: f.uuid }, f.name)))),
+      h("td", {}, trashed ? "ごみ箱" : "使用中"), h("td", {}, fmtDate(l.lastBackupAt)),
+      h("td", { class: "actions" }, ...(trashed ? [
+        h("button", { onclick: async () => { await repo.restoreLedger(l.uuid); toast("台帳を元に戻しました。"); render(); } }, "元に戻す"),
+        h("button", { class: "danger", onclick: async () => { if (await repo.confirm(`「${l.title}」を完全に削除します。写真は削除されません。よろしいですか？`)) { await repo.purgeLedger(l.uuid); toast("台帳を完全に削除しました。写真は残っています。"); render(); } } }, "完全に削除"),
+      ] : [
+        h("button", { onclick: () => go("editor", { ledgerUuid: l.uuid }) }, "開く"),
+        h("button", { onclick: async () => { const t = prompt("新しい台帳名", l.title); if (t) { try { await repo.applyLedgerOps(l.uuid, [{ op: "SetTitle", title: t }]); render(); } catch (e) { toast(message(e), "error"); } } } }, "名前変更"),
+        h("button", { onclick: async () => { await repo.duplicateLedger(l.uuid, `${l.title}（複製）`); toast("台帳を複製しました。元と同じフォルダに入れました。"); render(); } }, "複製"),
+        h("button", { onclick: () => pdfFlow(l.uuid, false) }, "PDF出力"),
+        h("button", { onclick: () => pdfFlow(l.uuid, true) }, "印刷"),
+        h("button", { class: "ghost", onclick: async () => { if (await repo.confirm(`「${l.title}」をごみ箱へ移します。写真は削除されません。`)) { await repo.trashLedger(l.uuid); toast("台帳をごみ箱へ移しました。写真は残っています。"); render(); } } }, "削除"),
+      ]))))));
+  const folderPanel = (folder, rows) => {
+    const id = folder?.uuid || "__unclassified";
+    const open = state.ledgerFolderOpen.has(id);
+    const name = folder?.name || "未分類";
+    return h("section", { class: `ledger-folder ${open ? "open" : ""}` },
+      h("div", { class: "ledger-folder-head" },
+        h("button", { class: "ledger-folder-toggle", "aria-expanded": open, onclick: () => { open ? state.ledgerFolderOpen.delete(id) : state.ledgerFolderOpen.add(id); render(); } },
+          h("span", { class: "folder-arrow", "aria-hidden": true }, open ? "▼" : "▶"), h("span", { class: "folder-icon", "aria-hidden": true }, "▰"), name, h("span", { class: "folder-count" }, `${rows.length}件`)),
+        folder ? h("div", { class: "row ledger-folder-actions" },
+          h("button", { class: "mini", onclick: async () => { const next = prompt("新しいフォルダ名", folder.name); if (!next?.trim()) return; try { await repo.renameLedgerFolder(folder.uuid, next); toast("フォルダ名を変更しました。"); render(); } catch (e) { toast(message(e), "error"); } } }, "名前変更"),
+          h("button", { class: "mini ghost", onclick: async () => { if (await repo.confirm(`「${folder.name}」フォルダだけを削除します。中の台帳は未分類へ移り、台帳内容と写真は削除されません。`)) { await repo.deleteLedgerFolder(folder.uuid); state.ledgerFolderOpen.delete(folder.uuid); toast("フォルダを削除し、中の台帳を未分類へ移しました。"); render(); } } }, "フォルダ削除")) : null),
+      open ? (rows.length ? ledgerTable(rows) : h("p", { class: "muted ledger-folder-empty" }, "このフォルダには台帳がありません。各台帳の「整理先」から移動できます。")) : null);
+  };
+  const groups = folders.map(f => folderPanel(f, list.filter(l => l.folderUuid === f.uuid)));
+  const unclassified = list.filter(l => !l.folderUuid || !folders.some(f => f.uuid === l.folderUuid));
   main.append(h("section", { class: "ledgers" },
     h("div", { class: "row space" },
       h("div", { class: "tabs" },
         h("button", { class: trashed ? "" : "active", onclick: () => go("ledgers", { ledgerTrash: false }) }, "台帳"),
         h("button", { class: trashed ? "active" : "", onclick: () => go("ledgers", { ledgerTrash: true }) }, "ごみ箱")),
-      trashed ? null : h("div", { class: "row" }, title, h("button", { class: "primary", onclick: async () => {
+      trashed ? null : h("div", { class: "row wrap" }, h("button", { onclick: createFolder }, "＋ フォルダを作る"), title, h("button", { class: "primary", onclick: async () => {
         try { const l = await repo.createLedger(title.value || `台帳 ${new Date().toLocaleDateString("ja-JP")}`); go("editor", { ledgerUuid: l.uuid }); } catch (e) { toast(message(e), "error"); }
       } }, "台帳を作る"))),
-    list.length ? h("table", { class: "table" },
-      h("thead", {}, h("tr", {}, ...["台帳名", "工事名", "作成日時", "更新日時", "ページ数", "配置写真数", "状態", "最終バックアップ", ""].map(x => h("th", {}, x)))),
-      h("tbody", {}, ...list.map(l => h("tr", {},
-        h("td", {}, trashed ? l.title : h("button", { class: "link", onclick: () => go("editor", { ledgerUuid: l.uuid }) }, l.title)),
-        h("td", {}, l.projectName), h("td", {}, fmtDate(l.createdAt)), h("td", {}, fmtDate(l.updatedAt)), h("td", { class: "num" }, l.pageCount), h("td", { class: "num" }, l.photoCount),
-        h("td", {}, trashed ? "ごみ箱" : "使用中"), h("td", {}, fmtDate(l.lastBackupAt)),
-        h("td", { class: "actions" }, ...(trashed ? [
-          h("button", { onclick: async () => { await repo.restoreLedger(l.uuid); toast("台帳を元に戻しました。"); render(); } }, "元に戻す"),
-          h("button", { class: "danger", onclick: async () => { if (await repo.confirm(`「${l.title}」を完全に削除します。写真は削除されません。よろしいですか？`)) { await repo.purgeLedger(l.uuid); toast("台帳を完全に削除しました。写真は残っています。"); render(); } } }, "完全に削除"),
-        ] : [
-          h("button", { onclick: () => go("editor", { ledgerUuid: l.uuid }) }, "開く"),
-          h("button", { onclick: async () => { const t = prompt("新しい台帳名", l.title); if (t) { try { await repo.applyLedgerOps(l.uuid, [{ op: "SetTitle", title: t }]); render(); } catch (e) { toast(message(e), "error"); } } } }, "名前変更"),
-          h("button", { onclick: async () => { await repo.duplicateLedger(l.uuid, `${l.title}（複製）`); toast("台帳を複製しました。"); render(); } }, "複製"),
-          h("button", { onclick: () => pdfFlow(l.uuid, false) }, "PDF出力"),
-          h("button", { onclick: () => pdfFlow(l.uuid, true) }, "印刷"),
-          h("button", { class: "ghost", onclick: async () => { if (await repo.confirm(`「${l.title}」をごみ箱へ移します。写真は削除されません。`)) { await repo.trashLedger(l.uuid); toast("台帳をごみ箱へ移しました。写真は残っています。"); render(); } } }, "削除"),
-        ]))))))
-      : h("p", { class: "muted empty" }, trashed ? "ごみ箱は空です。" : "まだ台帳がありません。台帳名を入れて「台帳を作る」を押してください。"),
+    trashed ? (list.length ? ledgerTable(list) : h("p", { class: "muted empty" }, "ごみ箱は空です。"))
+      : (list.length || folders.length ? h("div", { class: "ledger-folders" }, ...groups, folderPanel(null, unclassified))
+        : h("p", { class: "muted empty" }, "まだ台帳がありません。台帳名を入れて「台帳を作る」を押してください。")),
     trashed ? null : h("p", { class: "muted" }, "工事全体（写真と全台帳）を別のパソコンへ渡すときは「別端末へ引き継ぐ」を使ってください。")));
 }
 

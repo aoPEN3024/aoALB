@@ -321,6 +321,31 @@ fn ledgers_list(state: State<AppState>, trashed: bool) -> Res<Vec<ledger::Ledger
 }
 
 #[tauri::command]
+fn ledger_folders_list(state: State<AppState>) -> Res<Vec<ledger::LedgerFolder>> {
+    with_project(&state, |p| ledger::folders(&p.conn))
+}
+
+#[tauri::command]
+fn ledger_folder_create(state: State<AppState>, name: String) -> Res<ledger::LedgerFolder> {
+    with_project(&state, |p| ledger::create_folder(p, &name))
+}
+
+#[tauri::command]
+fn ledger_folder_rename(state: State<AppState>, uuid: String, name: String) -> Res<ledger::LedgerFolder> {
+    with_project(&state, |p| ledger::rename_folder(p, &uuid, &name))
+}
+
+#[tauri::command]
+fn ledger_folder_delete(state: State<AppState>, uuid: String) -> Res<()> {
+    with_project(&state, |p| ledger::delete_folder(p, &uuid))
+}
+
+#[tauri::command]
+fn ledger_move_to_folder(state: State<AppState>, ledger_uuid: String, folder_uuid: Option<String>) -> Res<()> {
+    with_project(&state, |p| ledger::move_to_folder(p, &ledger_uuid, folder_uuid.as_deref()))
+}
+
+#[tauri::command]
 fn ledger_create(state: State<AppState>, title: String) -> Res<ledger::LedgerDetail> {
     with_project(&state, |p| ledger::create(p, &title, 1))
 }
@@ -581,6 +606,11 @@ pub fn run() {
             template_save,
             template_delete,
             ledgers_list,
+            ledger_folders_list,
+            ledger_folder_create,
+            ledger_folder_rename,
+            ledger_folder_delete,
+            ledger_move_to_folder,
             ledger_create,
             ledger_detail,
             ledger_apply,

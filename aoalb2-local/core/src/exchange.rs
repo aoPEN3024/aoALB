@@ -13,6 +13,7 @@
 
 use crate::db;
 use crate::error::{AppError, ErrorKind, Result};
+use crate::ledger;
 use crate::project::{self, APP_VERSION, DB_FILE, MARKER_FILE, Project};
 use crate::util::{self, Cancel, Progress, ProgressFn, now};
 use rusqlite::{Connection, params};
@@ -107,12 +108,13 @@ pub fn plan_export(project: &Project, dest_dir: &Path) -> Result<ExportPlan> {
 type ExchangeData = (Value, Vec<Value>, Vec<Value>, Vec<Value>);
 
 fn data_json(conn: &Connection) -> Result<ExchangeData> {
-    let project = conn.query_row("select uuid, name, kouji_code, contractor, created_at, updated_at, revision from project", [], |r| {
+    let mut project = conn.query_row("select uuid, name, kouji_code, contractor, created_at, updated_at, revision from project", [], |r| {
         Ok(json!({
             "uuid": r.get::<_, String>(0)?, "name": r.get::<_, String>(1)?, "koujiCode": r.get::<_, String>(2)?, "contractor": r.get::<_, String>(3)?,
             "createdAt": r.get::<_, String>(4)?, "updatedAt": r.get::<_, String>(5)?, "revision": r.get::<_, i64>(6)?,
         }))
     })?;
+    project["ledgerFolders"] = serde_json::to_value(ledger::folder_state(conn)?)?;
     let mut stmt = conn.prepare("select p.uuid, p.photo_uid, p.source_kind, p.sha256, p.bytes, p.width, p.height, p.orientation, p.components, p.adobe_cmyk, p.taken_at, p.taken_at_source,
         p.original_name, p.folder_label, p.photo_number, p.orig_koushu, p.orig_shubetsu, p.orig_saibetsu, p.orig_sokuten, p.orig_tekiyo, p.aopic_json, p.exif_json,
         p.created_at, p.updated_at, p.revision, p.deleted_at, o.photo_uuid is not null, o.koushu, o.shubetsu, o.saibetsu, o.sokuten, o.tekiyo, o.updated_at, o.revision
@@ -598,6 +600,14 @@ pub fn import(path: &Path, dest_parent: &Path, mode: ImportMode, device_id: &str
         let ledgers = ledgers.as_array().ok_or_else(|| AppError::invalid("台帳情報を読み取れません。"))?;
         // 参照の検証
         let photo_ids: HashSet<String> = photos.iter().map(|p| s(p, "uuid")).collect();
+        let ledger_ids: HashSet<String> = ledgers.iter().map(|l| s(l, "uuid")).collect();
+        if ledger_ids.len() != ledgers.len() || ledger_ids.iter().any(|u| !util::is_uuid(u)) {
+            return Err(AppError::invalid("台帳情報が正しくありません。"));
+        }
+        let folder_state: ledger::LedgerFolderState = if proj.get("ledgerFolders").is_some() {
+            serde_json::from_value(proj["ledgerFolders"].clone()).map_err(|_| AppError::invalid("台帳フォルダ情報を読み取れません。"))?
+        } else { ledger::LedgerFolderState::default() };
+        let folder_state = ledger::validate_folder_state(folder_state, Some(&ledger_ids))?;
         let by_path: HashMap<&str, &FileEntry> = m.files.iter().map(|f| (f.path.as_str(), f)).collect();
         if photo_ids.len() != photos.len() || photo_ids.iter().any(|u| !util::is_uuid(u)) {
             return Err(AppError::invalid("写真情報が正しくありません。"));
@@ -741,6 +751,7 @@ pub fn import(path: &Path, dest_parent: &Path, mode: ImportMode, device_id: &str
         ] {
             db::set_meta(&tx, k, &v)?;
         }
+        db::set_meta(&tx, ledger::FOLDERS_META_KEY, &serde_json::to_string(&folder_state)?)?;
         tx.commit()?;
         if !db::integrity_ok(&conn)? {
             return Err(AppError::corrupt("取込み後の確認で不整合が見つかりました。"));

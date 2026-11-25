@@ -606,7 +606,9 @@ pub fn import(path: &Path, dest_parent: &Path, mode: ImportMode, device_id: &str
         }
         let folder_state: ledger::LedgerFolderState = if proj.get("ledgerFolders").is_some() {
             serde_json::from_value(proj["ledgerFolders"].clone()).map_err(|_| AppError::invalid("台帳フォルダ情報を読み取れません。"))?
-        } else { ledger::LedgerFolderState::default() };
+        } else {
+            ledger::LedgerFolderState::default()
+        };
         let folder_state = ledger::validate_folder_state(folder_state, Some(&ledger_ids))?;
         let by_path: HashMap<&str, &FileEntry> = m.files.iter().map(|f| (f.path.as_str(), f)).collect();
         if photo_ids.len() != photos.len() || photo_ids.iter().any(|u| !util::is_uuid(u)) {

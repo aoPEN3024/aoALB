@@ -93,7 +93,9 @@ pub struct LedgerFolderState {
 
 fn check_folder_name(name: &str) -> Result<String> {
     let name = name.trim();
-    if name.is_empty() { return Err(AppError::invalid("フォルダ名を入力してください。")); }
+    if name.is_empty() {
+        return Err(AppError::invalid("フォルダ名を入力してください。"));
+    }
     if name.chars().count() > MAX_FOLDER_NAME {
         return Err(AppError::invalid(format!("フォルダ名は{MAX_FOLDER_NAME}文字以内にしてください。")));
     }
@@ -122,7 +124,9 @@ pub fn validate_folder_state(mut state: LedgerFolderState, allowed_ledgers: Opti
 }
 
 pub fn folder_state(conn: &Connection) -> Result<LedgerFolderState> {
-    let Some(raw) = crate::db::get_meta(conn, FOLDERS_META_KEY)? else { return Ok(LedgerFolderState::default()); };
+    let Some(raw) = crate::db::get_meta(conn, FOLDERS_META_KEY)? else {
+        return Ok(LedgerFolderState::default());
+    };
     let state: LedgerFolderState = serde_json::from_str(&raw).map_err(|_| AppError::corrupt("台帳フォルダ情報を読み取れません。"))?;
     validate_folder_state(state, None)
 }
@@ -131,14 +135,20 @@ fn save_folder_state(conn: &Connection, state: &LedgerFolderState) -> Result<()>
     crate::db::set_meta(conn, FOLDERS_META_KEY, &serde_json::to_string(state)?)
 }
 
-pub fn folders(conn: &Connection) -> Result<Vec<LedgerFolder>> { Ok(folder_state(conn)?.folders) }
+pub fn folders(conn: &Connection) -> Result<Vec<LedgerFolder>> {
+    Ok(folder_state(conn)?.folders)
+}
 
 pub fn create_folder(project: &mut Project, name: &str) -> Result<LedgerFolder> {
     let name = check_folder_name(name)?;
     let tx = project.conn.transaction()?;
     let mut state = folder_state(&tx)?;
-    if state.folders.len() >= MAX_FOLDERS { return Err(AppError::invalid("台帳フォルダはこれ以上作れません。")); }
-    if state.folders.iter().any(|f| f.name.eq_ignore_ascii_case(&name)) { return Err(AppError::invalid("同じ名前のフォルダがあります。")); }
+    if state.folders.len() >= MAX_FOLDERS {
+        return Err(AppError::invalid("台帳フォルダはこれ以上作れません。"));
+    }
+    if state.folders.iter().any(|f| f.name.eq_ignore_ascii_case(&name)) {
+        return Err(AppError::invalid("同じ名前のフォルダがあります。"));
+    }
     let folder = LedgerFolder { uuid: util::new_uuid(), name, position: state.folders.len() as i64 };
     state.folders.push(folder.clone());
     save_folder_state(&tx, &state)?;
@@ -151,7 +161,9 @@ pub fn rename_folder(project: &mut Project, uuid: &str, name: &str) -> Result<Le
     let name = check_folder_name(name)?;
     let tx = project.conn.transaction()?;
     let mut state = folder_state(&tx)?;
-    if state.folders.iter().any(|f| f.uuid != uuid && f.name.eq_ignore_ascii_case(&name)) { return Err(AppError::invalid("同じ名前のフォルダがあります。")); }
+    if state.folders.iter().any(|f| f.uuid != uuid && f.name.eq_ignore_ascii_case(&name)) {
+        return Err(AppError::invalid("同じ名前のフォルダがあります。"));
+    }
     let folder = state.folders.iter_mut().find(|f| f.uuid == uuid).ok_or_else(|| AppError::not_found("フォルダが見つかりません。"))?;
     folder.name = name;
     let result = folder.clone();
@@ -167,9 +179,13 @@ pub fn delete_folder(project: &mut Project, uuid: &str) -> Result<()> {
     let mut state = folder_state(&tx)?;
     let before = state.folders.len();
     state.folders.retain(|f| f.uuid != uuid);
-    if state.folders.len() == before { return Err(AppError::not_found("フォルダが見つかりません。")); }
+    if state.folders.len() == before {
+        return Err(AppError::not_found("フォルダが見つかりません。"));
+    }
     state.assignments.retain(|_, folder| folder != uuid);
-    for (i, folder) in state.folders.iter_mut().enumerate() { folder.position = i as i64; }
+    for (i, folder) in state.folders.iter_mut().enumerate() {
+        folder.position = i as i64;
+    }
     save_folder_state(&tx, &state)?;
     Project::touch(&tx, &project.device_id)?;
     tx.commit()?;
@@ -179,12 +195,18 @@ pub fn delete_folder(project: &mut Project, uuid: &str) -> Result<()> {
 pub fn move_to_folder(project: &mut Project, ledger_uuid: &str, folder_uuid: Option<&str>) -> Result<()> {
     let tx = project.conn.transaction()?;
     let exists: bool = tx.query_row("select exists(select 1 from ledgers where uuid = ?1 and deleted_at is null)", [ledger_uuid], |r| r.get(0))?;
-    if !exists { return Err(AppError::not_found("台帳が見つかりません。")); }
+    if !exists {
+        return Err(AppError::not_found("台帳が見つかりません。"));
+    }
     let mut state = folder_state(&tx)?;
     match folder_uuid.filter(|s| !s.is_empty()) {
-        Some(folder) if state.folders.iter().any(|f| f.uuid == folder) => { state.assignments.insert(ledger_uuid.into(), folder.into()); }
+        Some(folder) if state.folders.iter().any(|f| f.uuid == folder) => {
+            state.assignments.insert(ledger_uuid.into(), folder.into());
+        }
         Some(_) => return Err(AppError::not_found("移動先のフォルダが見つかりません。")),
-        None => { state.assignments.remove(ledger_uuid); }
+        None => {
+            state.assignments.remove(ledger_uuid);
+        }
     }
     save_folder_state(&tx, &state)?;
     Project::touch(&tx, &project.device_id)?;

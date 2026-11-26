@@ -5,7 +5,7 @@ const clean = value => String(value || "").replace(/[\u0000-\u001f]+/g, " ").rep
 const normalizedLines = input => (input?.lines?.length ? input.lines : String(input?.text || "").split(/\r?\n/)).map(clean).filter(Boolean);
 
 function labeled(lines, labels) {
-  const label = labels.map(x => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  const label = labels.map(x => [...x].map(c => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s*")).join("|");
   const exact = new RegExp(`^(?:${label})\\s*[：:]?\\s*(.*)$`);
   for (let i = 0; i < lines.length; i++) {
     const match = lines[i].match(exact);
@@ -19,9 +19,9 @@ function labeled(lines, labels) {
 
 export function candidateFromOcr(input) {
   const lines = normalizedLines(input);
-  const koushu = labeled(lines, ["工種", "工事種別"]);
-  const sokuten = labeled(lines, ["測点", "場所", "施工箇所"]);
-  const body = labeled(lines, ["施工内容", "作業内容", "工事内容", "摘要", "備考"]);
+  const koushu = labeled(lines, ["工種", "工事種別", "工事種類", "工事種目"]);
+  const sokuten = labeled(lines, ["測点", "場所", "施工箇所", "工事箇所", "作業箇所", "施工位置"]);
+  const body = labeled(lines, ["施工内容", "作業内容", "工事内容", "写真内容", "工程", "摘要", "備考"]);
   const found = [koushu, sokuten, body].filter(Boolean).length;
   return {
     source: "ocr",

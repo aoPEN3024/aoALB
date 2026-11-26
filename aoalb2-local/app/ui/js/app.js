@@ -446,13 +446,26 @@ function showBlackboardCandidate(candidate, current, apply) {
     const value = candidate[key] || "";
     const check = h("input", { type: "checkbox", checked: !!value && !current.manual[key], disabled: !value });
     const input = key === "body" ? h("textarea", { rows: 4, maxlength: CAPTION_LIMITS[key] }, value) : h("input", { value, maxlength: CAPTION_LIMITS[key] });
+    input.oninput = () => { check.disabled = !input.value.trim(); if (!check.disabled) check.checked = true; };
     fields[key] = { check, input };
     return h("div", { class: "ocr-candidate-field" },
       h("label", { class: "check" }, check, `${label}へ反映`, current.manual[key] ? h("span", { class: "warn" }, "（手入力済みのため初期状態では反映しません）") : null),
       input,
       h("div", { class: "muted" }, `現在：${current[key] || "空欄"}`));
   });
-  const raw = candidate.rawLines?.length ? h("details", {}, h("summary", {}, `読み取った全文（${candidate.rawLines.length}行）`), h("pre", { class: "ocr-raw" }, candidate.rawLines.join("\n"))) : null;
+  const assignLine = (key, value) => {
+    fields[key].input.value = value;
+    fields[key].check.disabled = false;
+    fields[key].check.checked = true;
+  };
+  const raw = candidate.rawLines?.length ? h("details", { open: !candidate.koushu && !candidate.sokuten && !candidate.body },
+    h("summary", {}, `読み取った文字を手動で割り当てる（${candidate.rawLines.length}行）`),
+    h("p", { class: "muted" }, "自動判定できない場合は、黒板の行を選んで割り当ててください。入力欄へ直接修正することもできます。"),
+    ...candidate.rawLines.map(line => h("div", { class: "ocr-raw-line" }, h("span", {}, line),
+      h("button", { class: "mini", onclick: () => assignLine("koushu", line) }, "工種へ"),
+      h("button", { class: "mini", onclick: () => assignLine("sokuten", line) }, "測点へ"),
+      h("button", { class: "mini", onclick: () => assignLine("body", line) }, "台帳文へ"))),
+    h("button", { class: "mini", onclick: () => assignLine("body", candidate.rawLines.join(" ")) }, "全文を台帳文へ")) : null;
   modal("黒板の読み取り候補", h("div", { class: "ocr-result" },
     h("p", {}, `情報元：${candidate.sourceLabel}／確からしさ：${candidate.confidence}`),
     h("p", { class: "muted" }, candidate.note), ...rows, raw,

@@ -163,6 +163,9 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 .ocr-candidate-field { display: grid; gap: 5px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; }
 .ocr-candidate-field textarea { min-height: 80px; }
 .ocr-raw { white-space: pre-wrap; max-height: 180px; overflow: auto; background: #f7f9fb; padding: 8px; border-radius: 6px; }
+.ocr-raw-line { display: grid; grid-template-columns: minmax(160px, 1fr) auto auto auto; gap: 6px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--line); }
+.ocr-raw-line span { overflow-wrap: anywhere; }
+@media (max-width: 600px) { .ocr-raw-line { grid-template-columns: 1fr auto auto; } .ocr-raw-line span { grid-column: 1 / -1; } }
 
 .thumb-canvas { width: 100%; height: 100%; display: block; }
 .slot-photo .thumb-canvas { position: absolute; inset: 0; }

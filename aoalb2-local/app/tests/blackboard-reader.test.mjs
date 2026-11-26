@@ -19,9 +19,16 @@ test("項目を安全に判別できない全文は台帳へ自動提案しな�
   assert.deepEqual([result.koushu, result.sokuten, result.body, result.confidence], ["", "", "", "低"]);
 });
 
+test("黒板項目名の空白と表記揺れを候補として認識する", () => {
+  const result = candidateFromOcr({ lines: ["工 種", "塗装工", "工 事 箇 所：P12", "工 程 上塗り施工状況"] });
+  assert.deepEqual([result.koushu, result.sokuten, result.body], ["塗装工", "P12", "上塗り施工状況"]);
+});
+
 test("aoPIC写真でも保存済み情報と実画像OCRの両方を選べる", async () => {
   const source = await readFile(new URL("../ui/js/app.js", import.meta.url), "utf8");
   assert.match(source, /aoPICの黒板情報を候補にする/);
   assert.match(source, /写真の黒板を読み取る（試作）/);
   assert.match(source, /useAopicData: false/);
+  assert.match(source, /読み取った文字を手動で割り当てる/);
+  assert.match(source, /全文を台帳文へ/);
 });

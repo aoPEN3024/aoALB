@@ -6,6 +6,7 @@ import { SaveQueue, SaveStatus } from "./save-queue.js";
 import { makeDraggable, onDrop } from "./pointer-drag.js";
 import { drawThumb, releaseCanvas } from "./thumb-loader.js";
 import { LeaveGuard, createExitHandler, describeOps } from "./leave-guard.js";
+import { candidateFromAopic, candidateFromOcr } from "./blackboard-reader.js";
 
 const repo = createRepository();
 const FIELDS = ["koushu", "shubetsu", "saibetsu", "sokuten", "tekiyo"];
@@ -438,6 +439,69 @@ async function showPhotoDetail(uuid) {
       d.ledgers?.length ? [h("dt", {}, "使用中の台帳"), h("dd", {}, d.ledgers.map(l => l.title).join("、"))] : [])), [{ label: "閉じる", primary: true }]);
 }
 
+function showBlackboardCandidate(candidate, current, apply) {
+  const labels = { koushu: "工種", sokuten: "測点", body: "台帳文" };
+  const fields = {};
+  const rows = Object.entries(labels).map(([key, label]) => {
+    const value = candidate[key] || "";
+    const check = h("input", { type: "checkbox", checked: !!value && !current.manual[key], disabled: !value });
+    const input = key === "body" ? h("textarea", { rows: 4, maxlength: CAPTION_LIMITS[key] }, value) : h("input", { value, maxlength: CAPTION_LIMITS[key] });
+    fields[key] = { check, input };
+    return h("div", { class: "ocr-candidate-field" },
+      h("label", { class: "check" }, check, `${label}へ反映`, current.manual[key] ? h("span", { class: "warn" }, "（手入力済みのため初期状態では反映しません）") : null),
+      input,
+      h("div", { class: "muted" }, `現在：${current[key] || "空欄"}`));
+  });
+  const raw = candidate.rawLines?.length ? h("details", {}, h("summary", {}, `読み取った全文（${candidate.rawLines.length}行）`), h("pre", { class: "ocr-raw" }, candidate.rawLines.join("\n"))) : null;
+  modal("黒板の読み取り候補", h("div", { class: "ocr-result" },
+    h("p", {}, `情報元：${candidate.sourceLabel}／確からしさ：${candidate.confidence}`),
+    h("p", { class: "muted" }, candidate.note), ...rows, raw,
+    h("p", { class: "warn" }, "候補です。写真の黒板と見比べてから反映してください。原寸写真と黒板画像は変更されません。")), [
+    { label: "使用しない" },
+    { label: "選んだ候補を反映", primary: true, onClick: async () => {
+      const selected = Object.fromEntries(Object.entries(fields).filter(([, v]) => v.check.checked).map(([key, v]) => [key, v.input.value]));
+      if (!Object.keys(selected).length) { toast("反映する項目を選んでください。", "error"); return false; }
+      await apply(selected);
+      toast("確認した候補を台帳へ反映しました。");
+    } },
+  ]);
+}
+
+async function readBlackboard(photo, current, apply) {
+  if (photo.sourceKind === "aopic") {
+    try {
+      showBlackboardCandidate(candidateFromAopic(await repo.photoDetail(photo.uuid)), current, apply);
+    } catch (e) { toast(message(e), "error"); }
+    return;
+  }
+  const image = h("img", { src: repo.originalUrl(photo), alt: "黒板範囲を選ぶ" });
+  const overlay = h("div", { class: "ocr-selection" });
+  const stage = h("div", { class: "ocr-stage" }, image, overlay);
+  const status = h("p", { class: "muted" }, "黒板を囲むように、写真の上をドラッグしてください。最初は画像全体が選ばれています。");
+  let crop = { x: 0, y: 0, width: 1, height: 1 };
+  let start = null;
+  const draw = () => Object.assign(overlay.style, { left: `${crop.x * 100}%`, top: `${crop.y * 100}%`, width: `${crop.width * 100}%`, height: `${crop.height * 100}%` });
+  const point = e => { const r = image.getBoundingClientRect(); return { x: Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)), y: Math.max(0, Math.min(1, (e.clientY - r.top) / r.height)) }; };
+  stage.onpointerdown = e => { if (!image.complete) return; start = point(e); stage.setPointerCapture(e.pointerId); crop = { x: start.x, y: start.y, width: 0.01, height: 0.01 }; draw(); };
+  stage.onpointermove = e => { if (!start) return; const p = point(e); crop = { x: Math.min(start.x, p.x), y: Math.min(start.y, p.y), width: Math.max(0.01, Math.abs(p.x - start.x)), height: Math.max(0.01, Math.abs(p.y - start.y)) }; draw(); };
+  stage.onpointerup = e => { if (!start) return; stage.releasePointerCapture(e.pointerId); start = null; };
+  image.onload = draw;
+  modal("黒板を囲んで読み取る（試作）", h("div", { class: "ocr-picker" }, stage, status,
+    h("p", { class: "muted" }, "処理はこのWindows端末内だけで行います。写真は外部へ送信しません。")), [
+    { label: "キャンセル" },
+    { label: "選択範囲を読み取る", primary: true, onClick: async () => {
+      if (crop.width < 0.02 || crop.height < 0.02) { status.textContent = "黒板をもう少し大きく囲んでください。"; status.className = "warn"; return false; }
+      status.textContent = "読み取っています…";
+      try {
+        const result = await repo.readBlackboard(photo.uuid, crop);
+        const candidate = candidateFromOcr(result);
+        if (!candidate.rawLines.length) { status.textContent = "文字を読み取れませんでした。黒板を大きめに囲むか、正面に近い写真でお試しください。"; status.className = "warn"; return false; }
+        queueMicrotask(() => showBlackboardCandidate(candidate, current, apply));
+      } catch (e) { status.textContent = message(e); status.className = "warn"; return false; }
+    } },
+  ]);
+}
+
 async function undoClass(refresh) {
   const s = state.classUndo.pop(); if (!s) return toast("元に戻す変更がありません。");
   state.classRedo.push(await repo.restoreClassification(s)); await refresh(); toast("分類の変更を元に戻しました。");
@@ -786,6 +850,7 @@ async function renderEditor(main) {
         };
         parts.push(h("div", { class: "slot-photo-preview" }, h("img", { src: repo.thumbUrl(photo) || "", alt: "" })),
           field("koushu", "工種", false), field("sokuten", "測点", false), field("body", "台帳文", true),
+          h("button", { class: "primary", onclick: () => readBlackboard(photo, c, fields => exec([{ op: "SetCaption", photo: photo.uuid, fields }])) }, photo.sourceKind === "aopic" ? "aoPICの黒板情報を候補にする" : "黒板を読み取る（試作）"),
           h("button", { onclick: () => showPhotoDetail(photo.uuid) }, "写真の詳細"),
           h("button", { onclick: () => exec([{ op: "Clear", slot: s.uuid }]).then(refreshLeft) }, "未配置へ戻す"));
       } else if (s.kind === "blank") parts.push(h("p", {}, "空白枠です。"), h("button", { onclick: () => exec([{ op: "SetBlank", slot: s.uuid, blank: false }]) }, "空白を解除"));

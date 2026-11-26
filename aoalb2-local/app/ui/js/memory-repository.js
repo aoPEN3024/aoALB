@@ -106,6 +106,9 @@ export class MemoryRepository {
     const p = this.photos.find(x => x.uuid === id);
     return { photo: this._row(p), sha256: "", aopic: p.sourceKind === "aopic" ? { boardSnapshot: { koujimei: "架空 橋梁塗装工事", ...p.original } } : null, exif: { make: "架空カメラ" }, ledgers: [] };
   }
+  async readBlackboard() {
+    return { text: "工種 塗装工\n測点 P12\n施工内容 上塗り 施工状況", lines: ["工種 塗装工", "測点 P12", "施工内容 上塗り 施工状況"], language: "ja-JP", cropWidth: 1600, cropHeight: 900 };
+  }
   async trashPhotos(ids) { ids.forEach(i => { this.photos.find(p => p.uuid === i).deletedAt = now(); }); return ids.length; }
   async restorePhotos(ids) { ids.forEach(i => { this.photos.find(p => p.uuid === i).deletedAt = null; }); return ids.length; }
   async folderLabels() {

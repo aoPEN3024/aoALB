@@ -19,7 +19,7 @@ name: aoALB2 local - Windows build
 
 on:
   push:
-    branches: [feature/aoalb2-local, feature/aoalb2-folder-classification]
+    branches: [feature/aoalb2-local, feature/aoalb2-folder-classification, feature/aoalb2-blackboard-ocr]
     paths: ["aoalb2-local/**", ".github/workflows/aoalb2-local-windows.yml"]
 
 permissions:

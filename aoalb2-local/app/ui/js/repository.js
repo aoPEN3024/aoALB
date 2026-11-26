@@ -7,7 +7,7 @@
 // 主なメソッド（すべて Promise を返す）
 //   工事     appInfo / createProject / openProject / closeProject / updateProject
 //   写真     importPhotos / retryImport / listPhotos / photoDetail / trashPhotos / restorePhotos / folderLabels
-//            thumbUrl(photo) / originalUrl(photo)（同期。画像のURL）
+//            thumbUrl(photo) / originalUrl(photo)（同期。画像のURL）/ readBlackboard(uuid, crop)
 //   分類     classify(photoUuids, changes) → 変更前の状態 / restoreClassification(states) / previewFolderClassification / applyFolderClassification / classifyMeta / saveTemplate / deleteTemplate
 //   台帳     listLedgers / listLedgerFolders / createLedgerFolder / renameLedgerFolder / deleteLedgerFolder / moveLedgerToFolder
 //            createLedger / ledgerDetail / applyLedgerOps(uuid, ops) / trashLedger / restoreLedger / purgeLedger / duplicateLedger / exportPdf

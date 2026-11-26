@@ -16,6 +16,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State};
 
+mod ocr;
+
 type Res<T> = std::result::Result<T, AppError>;
 
 #[derive(Default, Serialize, Deserialize, Clone)]
@@ -242,6 +244,20 @@ fn photos_list(state: State<AppState>, filter: PhotoFilter) -> Res<Vec<photos::P
 #[tauri::command]
 fn photo_detail(state: State<AppState>, uuid: String) -> Res<photos::PhotoDetail> {
     with_project(&state, |p| photos::photo_detail(p, &uuid))
+}
+
+#[tauri::command]
+async fn photo_blackboard_ocr(state: State<'_, AppState>, uuid: String, crop: ocr::Crop) -> Res<ocr::OcrOutput> {
+    let (path, orientation) = with_project(&state, |p| {
+        let orientation: i64 = p
+            .conn
+            .query_row("select orientation from photos where uuid = ?1 and deleted_at is null", [&uuid], |r| r.get(0))
+            .map_err(|_| AppError::not_found("写真が見つかりません。"))?;
+        Ok((p.root.join("originals").join(format!("{uuid}.jpg")), orientation))
+    })?;
+    tauri::async_runtime::spawn_blocking(move || ocr::recognize(&path, orientation, crop))
+        .await
+        .map_err(|e| AppError::internal(format!("ocr task: {e}")))?
 }
 
 #[tauri::command]
@@ -594,6 +610,7 @@ pub fn run() {
             import_failures,
             photos_list,
             photo_detail,
+            photo_blackboard_ocr,
             photos_trash,
             photos_restore,
             folder_labels,

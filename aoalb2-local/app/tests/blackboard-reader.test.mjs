@@ -1,0 +1,19 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { candidateFromAopic, candidateFromOcr } from "../ui/js/blackboard-reader.js";
+
+test("aoPICは保存済み分類と台帳文を高い確からしさで候補にする", () => {
+  const result = candidateFromAopic({ photo: { classification: { koushu: "塗装工", sokuten: "P12", tekiyo: "施工前" }, ledgerText: "上塗り 施工状況" }, aopic: { boardSnapshot: {} } });
+  assert.deepEqual([result.koushu, result.sokuten, result.body, result.confidence], ["塗装工", "P12", "上塗り 施工状況", "高"]);
+});
+
+test("OCRはラベル付きの行だけを各欄の候補にする", () => {
+  const result = candidateFromOcr({ lines: ["工事名 架空橋梁工事", "工種：塗装工", "測点 P12", "施工内容 上塗り 施工状況", "施工者 架空建設"] });
+  assert.deepEqual([result.koushu, result.sokuten, result.body, result.confidence], ["塗装工", "P12", "上塗り 施工状況", "中"]);
+  assert.equal(result.rawLines.length, 5);
+});
+
+test("項目を安全に判別できない全文は台帳へ自動提案しない", () => {
+  const result = candidateFromOcr({ text: "架空橋梁工事\n架空建設" });
+  assert.deepEqual([result.koushu, result.sokuten, result.body, result.confidence], ["", "", "", "低"]);
+});

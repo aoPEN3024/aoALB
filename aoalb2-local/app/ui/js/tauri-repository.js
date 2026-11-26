@@ -22,6 +22,7 @@ export class TauriRepository {
   listFailures(batch = null) { return call("import_failures", { batch }); }
   listPhotos(filter = {}) { return call("photos_list", { filter }); }
   photoDetail(uuid) { return call("photo_detail", { uuid }); }
+  readBlackboard(uuid, crop) { return call("photo_blackboard_ocr", { uuid, crop }); }
   trashPhotos(uuids) { return call("photos_trash", { uuids }); }
   restorePhotos(uuids) { return call("photos_restore", { uuids }); }
   folderLabels() { return call("folder_labels"); }

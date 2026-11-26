@@ -52,6 +52,7 @@ name = "aoalb2-app"
 version = "0.1.0"
 dependencies = [
  "aoalb_core",
+ "image",
  "rusqlite",
  "serde",
  "serde_json",
@@ -60,6 +61,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
  "uuid",
+ "windows 0.62.2",
 ]
 
 [[package]]

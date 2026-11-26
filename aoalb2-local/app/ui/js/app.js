@@ -467,8 +467,8 @@ function showBlackboardCandidate(candidate, current, apply) {
   ]);
 }
 
-async function readBlackboard(photo, current, apply) {
-  if (photo.sourceKind === "aopic") {
+async function readBlackboard(photo, current, apply, { useAopicData = true } = {}) {
+  if (photo.sourceKind === "aopic" && useAopicData) {
     try {
       showBlackboardCandidate(candidateFromAopic(await repo.photoDetail(photo.uuid)), current, apply);
     } catch (e) { toast(message(e), "error"); }
@@ -848,9 +848,16 @@ async function renderEditor(main) {
           return h("div", { class: "field" }, h("label", {}, label, c.manual[key] ? h("span", { class: "badge" }, "手入力") : h("span", { class: "muted" }, "（自動）")), input, warn,
             c.manual[key] ? h("button", { class: "mini", onclick: () => exec([{ op: "SetCaption", photo: photo.uuid, fields: { [key]: null } }]) }, `自動に戻す（${auto || "空欄"}）`) : null);
         };
+        const applyBlackboardFields = fields => exec([{ op: "SetCaption", photo: photo.uuid, fields }]);
+        const blackboardButtons = photo.sourceKind === "aopic"
+          ? [
+              h("button", { class: "primary", onclick: () => readBlackboard(photo, c, applyBlackboardFields) }, "aoPICの黒板情報を候補にする"),
+              h("button", { onclick: () => readBlackboard(photo, c, applyBlackboardFields, { useAopicData: false }) }, "写真の黒板を読み取る（試作）"),
+            ]
+          : [h("button", { class: "primary", onclick: () => readBlackboard(photo, c, applyBlackboardFields) }, "黒板を読み取る（試作）")];
         parts.push(h("div", { class: "slot-photo-preview" }, h("img", { src: repo.thumbUrl(photo) || "", alt: "" })),
           field("koushu", "工種", false), field("sokuten", "測点", false), field("body", "台帳文", true),
-          h("button", { class: "primary", onclick: () => readBlackboard(photo, c, fields => exec([{ op: "SetCaption", photo: photo.uuid, fields }])) }, photo.sourceKind === "aopic" ? "aoPICの黒板情報を候補にする" : "黒板を読み取る（試作）"),
+          ...blackboardButtons,
           h("button", { onclick: () => showPhotoDetail(photo.uuid) }, "写真の詳細"),
           h("button", { onclick: () => exec([{ op: "Clear", slot: s.uuid }]).then(refreshLeft) }, "未配置へ戻す"));
       } else if (s.kind === "blank") parts.push(h("p", {}, "空白枠です。"), h("button", { onclick: () => exec([{ op: "SetBlank", slot: s.uuid, blank: false }]) }, "空白を解除"));

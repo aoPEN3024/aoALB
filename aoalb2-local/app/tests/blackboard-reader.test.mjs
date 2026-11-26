@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { candidateFromAopic, candidateFromOcr } from "../ui/js/blackboard-reader.js";
 
 test("aoPICは保存済み分類と台帳文を高い確からしさで候補にする", () => {
@@ -16,4 +17,11 @@ test("OCRはラベル付きの行だけを各欄の候補にする", () => {
 test("項目を安全に判別できない全文は台帳へ自動提案しない", () => {
   const result = candidateFromOcr({ text: "架空橋梁工事\n架空建設" });
   assert.deepEqual([result.koushu, result.sokuten, result.body, result.confidence], ["", "", "", "低"]);
+});
+
+test("aoPIC写真でも保存済み情報と実画像OCRの両方を選べる", async () => {
+  const source = await readFile(new URL("../ui/js/app.js", import.meta.url), "utf8");
+  assert.match(source, /aoPICの黒板情報を候補にする/);
+  assert.match(source, /写真の黒板を読み取る（試作）/);
+  assert.match(source, /useAopicData: false/);
 });

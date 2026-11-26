@@ -97,31 +97,18 @@ fn recognize_windows(path: &Path) -> Result<(String, Vec<String>, String)> {
     use windows::Media::Ocr::OcrEngine;
     use windows::Storage::{FileAccessMode, StorageFile};
 
-    let language = Language::CreateLanguage(&HSTRING::from("ja-JP"))
-        .map_err(|e| AppError::internal(format!("ocr language: {e}")))?;
+    let language = Language::CreateLanguage(&HSTRING::from("ja-JP")).map_err(|e| AppError::internal(format!("ocr language: {e}")))?;
     if !OcrEngine::IsLanguageSupported(&language).unwrap_or(false) {
         return Err(AppError::invalid("Windowsの日本語OCRが利用できません。Windowsの言語設定で日本語を追加してください。"));
     }
-    let engine = OcrEngine::TryCreateFromLanguage(&language)
-        .map_err(|e| AppError::internal(format!("ocr engine: {e}")))?;
+    let engine = OcrEngine::TryCreateFromLanguage(&language).map_err(|e| AppError::internal(format!("ocr engine: {e}")))?;
     let file = StorageFile::GetFileFromPathAsync(&HSTRING::from(path.to_string_lossy().as_ref()))
         .and_then(|op| op.join())
         .map_err(|e| AppError::internal(format!("ocr file: {e}")))?;
-    let stream = file
-        .OpenAsync(FileAccessMode::Read)
-        .and_then(|op| op.join())
-        .map_err(|e| AppError::internal(format!("ocr stream: {e}")))?;
-    let decoder = BitmapDecoder::CreateAsync(&stream)
-        .and_then(|op| op.join())
-        .map_err(|e| AppError::internal(format!("ocr decoder: {e}")))?;
-    let bitmap = decoder
-        .GetSoftwareBitmapAsync()
-        .and_then(|op| op.join())
-        .map_err(|e| AppError::internal(format!("ocr bitmap: {e}")))?;
-    let result = engine
-        .RecognizeAsync(&bitmap)
-        .and_then(|op| op.join())
-        .map_err(|e| AppError::internal(format!("ocr recognize: {e}")))?;
+    let stream = file.OpenAsync(FileAccessMode::Read).and_then(|op| op.join()).map_err(|e| AppError::internal(format!("ocr stream: {e}")))?;
+    let decoder = BitmapDecoder::CreateAsync(&stream).and_then(|op| op.join()).map_err(|e| AppError::internal(format!("ocr decoder: {e}")))?;
+    let bitmap = decoder.GetSoftwareBitmapAsync().and_then(|op| op.join()).map_err(|e| AppError::internal(format!("ocr bitmap: {e}")))?;
+    let result = engine.RecognizeAsync(&bitmap).and_then(|op| op.join()).map_err(|e| AppError::internal(format!("ocr recognize: {e}")))?;
     let text = result.Text().map(|s| s.to_string()).unwrap_or_default();
     let mut lines = Vec::new();
     if let Ok(items) = result.Lines() {
@@ -134,11 +121,7 @@ fn recognize_windows(path: &Path) -> Result<(String, Vec<String>, String)> {
             }
         }
     }
-    let language = engine
-        .RecognizerLanguage()
-        .and_then(|l| l.LanguageTag())
-        .map(|s| s.to_string())
-        .unwrap_or_else(|_| "ja-JP".into());
+    let language = engine.RecognizerLanguage().and_then(|l| l.LanguageTag()).map(|s| s.to_string()).unwrap_or_else(|_| "ja-JP".into());
     Ok((text, lines, language))
 }
 

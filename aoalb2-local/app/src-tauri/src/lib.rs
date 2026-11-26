@@ -255,9 +255,7 @@ async fn photo_blackboard_ocr(state: State<'_, AppState>, uuid: String, crop: oc
             .map_err(|_| AppError::not_found("写真が見つかりません。"))?;
         Ok((p.root.join("originals").join(format!("{uuid}.jpg")), orientation))
     })?;
-    tauri::async_runtime::spawn_blocking(move || ocr::recognize(&path, orientation, crop))
-        .await
-        .map_err(|e| AppError::internal(format!("ocr task: {e}")))?
+    tauri::async_runtime::spawn_blocking(move || ocr::recognize(&path, orientation, crop)).await.map_err(|e| AppError::internal(format!("ocr task: {e}")))?
 }
 
 #[tauri::command]

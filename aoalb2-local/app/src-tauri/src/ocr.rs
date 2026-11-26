@@ -2,7 +2,7 @@
 //! 原寸写真は読み取り専用で、向き補正・切抜き・縮小はメモリ上と一時JPEGだけで行う。
 
 use aoalb_core::{AppError, Result};
-use image::{DynamicImage, GenericImageView, ImageEncoder, imageops::FilterType};
+use image::{imageops::FilterType, DynamicImage, GenericImageView, ImageEncoder};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -91,11 +91,11 @@ impl Drop for TempFile {
 
 #[cfg(windows)]
 fn recognize_windows(path: &Path) -> Result<(String, Vec<String>, String)> {
+    use windows::core::HSTRING;
     use windows::Globalization::Language;
     use windows::Graphics::Imaging::BitmapDecoder;
     use windows::Media::Ocr::OcrEngine;
     use windows::Storage::{FileAccessMode, StorageFile};
-    use windows::core::HSTRING;
 
     let _apartment = windows::core::initialize_mta().map_err(|e| AppError::internal(format!("ocr apartment: {e}")))?;
     let language = Language::CreateLanguage(&HSTRING::from("ja-JP")).map_err(|e| AppError::internal(format!("ocr language: {e}")))?;
